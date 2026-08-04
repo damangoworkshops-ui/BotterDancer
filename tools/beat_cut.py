@@ -50,6 +50,112 @@ def probe(ffprobe, path):
             "w": int(s["width"]), "h": int(s["height"])}
 
 
+def creature_signature(path, n_samples=5):
+    """Farb-/Statur-Signatur der Figur: HS-Histogramm + Flaechenanteil ueber
+    der Hintergrund-Maske (Studio-BG ist nahezu uniform -> Differenzmaske)."""
+    import cv2
+    import numpy as np
+
+    cap = cv2.VideoCapture(path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    hists, areas = [], []
+    for idx in np.linspace(0, total - 1, n_samples).astype(int):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        h, w = frame.shape[:2]
+        corners = np.concatenate([frame[:12, :12].reshape(-1, 3),
+                                  frame[:12, -12:].reshape(-1, 3),
+                                  frame[-12:, :12].reshape(-1, 3),
+                                  frame[-12:, -12:].reshape(-1, 3)])
+        bg = np.median(corners, axis=0)
+        mask = (np.linalg.norm(frame.astype(np.int16) - bg, axis=2) > 28).astype(np.uint8)
+        if mask.sum() < 500:
+            continue
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], mask, [18, 8], [0, 180, 0, 256])
+        cv2.normalize(hist, hist)
+        hists.append(hist)
+        areas.append(mask.mean())
+    cap.release()
+    if not hists:
+        return None
+    return {"hist": sum(hists) / len(hists), "area": float(sum(areas) / len(areas))}
+
+
+def image_signature(path):
+    """Signatur eines Referenz-Standbilds (gleiche Maske/Histogramm-Logik)."""
+    import cv2
+    import numpy as np
+
+    frame = cv2.imread(path)
+    if frame is None:
+        return None
+    corners = np.concatenate([frame[:12, :12].reshape(-1, 3),
+                              frame[:12, -12:].reshape(-1, 3),
+                              frame[-12:, :12].reshape(-1, 3),
+                              frame[-12:, -12:].reshape(-1, 3)])
+    bg = np.median(corners, axis=0)
+    mask = (np.linalg.norm(frame.astype(np.int16) - bg, axis=2) > 28).astype(np.uint8)
+    if mask.sum() < 500:
+        return None
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], mask, [18, 8], [0, 180, 0, 256])
+    cv2.normalize(hist, hist)
+    return {"hist": hist, "area": float(mask.mean())}
+
+
+def drift_check(videos, refs, max_hist_dist):
+    """Identitaets-Drift-Gate (Architektur-Review Fix #5: 'Drift-Check vor Stitch').
+
+    HARTES Gate: jeder Render gegen SEINE Referenz (Farbsignatur) — der Vertrag
+    ist 'Referenzbild dominiert die Ansicht', nicht 'alle Winkel sehen gleich
+    aus' (Blickwinkel verschieben die Farbverteilung legitim, empirisch 04.08.:
+    Front-vs-Rueck bis 0.83 Bhattacharyya bei KORREKTEN Renders).
+    Die paarweise Matrix wird nur informativ gedruckt."""
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        print("WARNUNG: OpenCV fehlt — Drift-Check uebersprungen.", file=sys.stderr)
+        return []
+    import cv2
+
+    sigs = []
+    for v in videos:
+        s = creature_signature(v)
+        if s is None:
+            return [f"Drift-Check: {os.path.basename(v)} liefert keine Figur-Maske."]
+        sigs.append(s)
+
+    print("Drift-Matrix paarweise (informativ, Blickwinkel-bedingt verschieden):")
+    for i in range(len(videos)):
+        for j in range(i + 1, len(videos)):
+            d = cv2.compareHist(sigs[i]["hist"], sigs[j]["hist"], cv2.HISTCMP_BHATTACHARYYA)
+            print(f"  {os.path.basename(videos[i]):28s} {os.path.basename(videos[j]):28s} {d:.3f}")
+
+    problems = []
+    if refs:
+        if len(refs) != len(videos):
+            return [f"--refs braucht genau {len(videos)} Eintraege (einen pro Video)."]
+        print(f"Referenz-Anker (hartes Gate, max {max_hist_dist}):")
+        for v, r in zip(videos, refs):
+            rs = image_signature(r)
+            if rs is None:
+                problems.append(f"Referenz {r} nicht lesbar/keine Figur-Maske.")
+                continue
+            vs = creature_signature(v)
+            d = cv2.compareHist(vs["hist"], rs["hist"], cv2.HISTCMP_BHATTACHARYYA)
+            tag = "  <-- DRIFT" if d > max_hist_dist else ""
+            print(f"  {os.path.basename(v):28s} vs {os.path.basename(r):28s} {d:.3f}{tag}")
+            if d > max_hist_dist:
+                problems.append(f"{os.path.basename(v)}: Farbdistanz {d:.3f} zur eigenen "
+                                f"Referenz {os.path.basename(r)} > {max_hist_dist}")
+    else:
+        print("HINWEIS: keine --refs uebergeben — Drift-Gate laeuft nur informativ.")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description="Multi-Angle-Beat-Cut (synchrone Timelines)")
     ap.add_argument("--videos", nargs="+", required=True,
@@ -59,6 +165,16 @@ def main():
     ap.add_argument("--every", type=int, default=2, help="Winkelwechsel alle N Beats")
     ap.add_argument("--out", required=True)
     ap.add_argument("--crf", type=int, default=14)
+    ap.add_argument("--refs", nargs="+",
+                    help="Referenzbild pro Video (gleiche Reihenfolge) fuer den Referenz-Anker-Report")
+    ap.add_argument("--max-drift", type=float, default=None,
+                    help="OPT-IN hartes Gate: max. Farbdistanz Video vs. eigene Referenz. "
+                         "ACHTUNG (Kalibrierung 04.08.): Farb-Histogramme sehen FORM-Drift "
+                         "(Hoerner/Statur) nicht — korrektes cam180 mass 0.50, falsche "
+                         "Katzen-Variante 0.36. Default: nur informativer Report; echter "
+                         "Detektor braucht Semantik-Embeddings (CLIP/DINO, Ausbaustufe).")
+    ap.add_argument("--skip-drift-check", action="store_true",
+                    help="Drift-Report komplett ueberspringen")
     args = ap.parse_args()
 
     if bool(args.grid) == bool(args.bpm):
@@ -79,6 +195,15 @@ def main():
     fps = float(ref["fps"])
     n_frames = min(i["frames"] for i in infos)
     duration = n_frames / fps
+
+    if not args.skip_drift_check:
+        problems = drift_check(args.videos, args.refs,
+                               args.max_drift if args.max_drift is not None else float("inf"))
+        if problems and args.max_drift is not None:
+            for p in problems:
+                print("PROBLEM: " + p, file=sys.stderr)
+            fail("Identitaets-Drift ueber --max-drift-Schwelle — Inputs regenerieren "
+                 "oder Schwelle bewusst anpassen.", 5)
 
     if args.grid:
         with open(args.grid, "r", encoding="utf-8-sig") as f:
