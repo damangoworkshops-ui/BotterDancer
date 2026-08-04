@@ -101,6 +101,21 @@ class TestExport(unittest.TestCase):
                 self._run(self.video, "--outdir", str(self.d / "export3"), *bad)
             self.assertEqual(cm.exception.code, 2)
 
+    def test_audio_mux(self):
+        """Audio-Lane: stummes Video + --audio wav -> Export mit genau 1 Video-
+        und 1 Audio-Stream, Verify inkl. Stream-Inventar gruen."""
+        wav = str(self.d / "beat.wav")
+        subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i",
+                        "sine=frequency=220:duration=2", "-y", wav],
+                       check=True, capture_output=True)
+        outdir = str(self.d / "export6")
+        self.assertEqual(self._run(self.video, "--outdir", outdir, "--audio", wav), 0)
+        ffprobe = ec.find_tool("ffprobe")
+        r = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_type",
+                            "-of", "csv=p=0", str(Path(outdir) / "in_export.mp4")],
+                           capture_output=True, text=True)
+        self.assertEqual(sorted(r.stdout.split()), ["audio", "video"])
+
     def test_zu_klein_fuers_watermark(self):
         """Regression: imwatermark verlangt >=256x256 — muss sauberer
         Vertragsfehler sein, kein RuntimeError tief im Encode."""

@@ -164,7 +164,7 @@ def load_credentials():
 
 
 # ------------------------------------------------------------------- Pixel-Ops
-def watermark_and_reencode(ffmpeg, src, dst, payload, crf, w, h, fps, nframes):
+def watermark_and_reencode(ffmpeg, src, dst, payload, crf, w, h, fps, nframes, audio=None):
     import cv2
     from imwatermark import WatermarkEncoder
 
@@ -181,6 +181,13 @@ def watermark_and_reencode(ffmpeg, src, dst, payload, crf, w, h, fps, nframes):
         ffmpeg, "-y", "-v", "error",
         "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}", "-r", fps,
         "-i", "-",
+    ]
+    if audio:
+        # Audio-Lane (04.08.): rechtefreier Track wird im selben Pass gemuxt —
+        # Eingabe-VIDEO bleibt vertragsgemaess stumm, Audio kommt nur von hier.
+        cmd += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
+                "-c:a", "aac", "-b:a", "192k", "-shortest"]
+    cmd += [
         "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
         "-bitexact",
         "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
@@ -222,13 +229,18 @@ def watermark_and_reencode(ffmpeg, src, dst, payload, crf, w, h, fps, nframes):
     print(f"  Watermark: {n}/{nframes} Frames verarbeitet, neu encodiert (crf {crf}, {w}x{h}@{fps})")
 
 
-def clean_remux(ffmpeg, src, dst):
-    run([ffmpeg, "-y", "-v", "error", "-i", str(src),
-         "-map", "0:v:0",
-         "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
-         "-bitexact", "-c", "copy", "-movflags", "+faststart", str(dst)],
-        what="Clean-Remux")
-    print("  Remux: nur Videostream uebernommen, Metadaten entfernt (verlustfrei, kein Watermark)")
+def clean_remux(ffmpeg, src, dst, audio=None):
+    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
+    if audio:
+        cmd += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+    else:
+        cmd += ["-map", "0:v:0", "-c", "copy"]
+    cmd += ["-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
+            "-bitexact", "-movflags", "+faststart", str(dst)]
+    run(cmd, what="Clean-Remux")
+    print("  Remux: Videostream uebernommen, Metadaten entfernt (Video verlustfrei"
+          + (", Audio gemuxt" if audio else ", kein Watermark") + ")")
 
 
 # ----------------------------------------------------------------------- C2PA
@@ -266,7 +278,7 @@ def c2pa_sign(signer, src, dst, title):
 
 
 # --------------------------------------------------------------------- Verify
-def verify(ffprobe, path, payload, watermarked, leaf_serial):
+def verify(ffprobe, path, payload, watermarked, leaf_serial, expect_audio=False):
     problems = []
     from c2pa import Reader
 
@@ -334,6 +346,10 @@ def verify(ffprobe, path, payload, watermarked, leaf_serial):
             print(f"  Verify Watermark: Payload {payload!r} aus Frames {checked} dekodiert")
 
     info = probe(ffprobe, path)
+    kinds = [s.get("codec_type") for s in info.get("streams", [])]
+    expected_kinds = ["video", "audio"] if expect_audio else ["video"]
+    if kinds != expected_kinds:
+        problems.append(f"Stream-Inventar {kinds} != erwartet {expected_kinds}")
     if info.get("chapters"):
         problems.append("Metadaten: Kapitel im Export")
     bad = {k: v for k, v in (info.get("format", {}).get("tags") or {}).items()
@@ -356,6 +372,8 @@ def main():
     ap.add_argument("--outdir", default=r"C:\ComfyUI\output\export", help="Zielverzeichnis (lokal)")
     ap.add_argument("--no-watermark", action="store_true",
                     help="nur Remux+C2PA (verlustfrei, ohne unsichtbares Watermark)")
+    ap.add_argument("--audio", help="rechtefreies Audiofile (wav/m4a) — wird beim Export "
+                    "gemuxt; das Eingabe-VIDEO muss weiterhin stumm sein")
     ap.add_argument("--wm-payload", default="BD26", help="Watermark-Payload (1-8 ASCII-Zeichen)")
     ap.add_argument("--crf", type=int, default=16, help="x264-Qualitaet (10-30)")
     ap.add_argument("--overwrite", action="store_true", help="vorhandene Export-Datei ersetzen")
@@ -385,6 +403,15 @@ def main():
     if dst.exists() and not args.overwrite:
         fail(2, f"{dst} existiert bereits -- --overwrite zum Ersetzen.")
 
+    audio = None
+    if args.audio:
+        audio = Path(args.audio)
+        if not audio.is_file():
+            fail(2, f"--audio {audio} existiert nicht.")
+        a_info = probe(ffprobe, audio)
+        if not any(s.get("codec_type") == "audio" for s in a_info.get("streams", [])):
+            fail(2, f"--audio {audio}: keine Audiospur gefunden.")
+
     signer, leaf_serial = load_credentials()
     w, h, fps, nframes = enforce_contract(probe(ffprobe, src), src)
     if not args.no_watermark and (w < 256 or h < 256):
@@ -398,13 +425,14 @@ def main():
         essence = Path(td) / "essence.mp4"
         staged = Path(td) / "staged.mp4"
         if args.no_watermark:
-            clean_remux(ffmpeg, src, essence)
+            clean_remux(ffmpeg, src, essence, audio=audio)
         else:
-            watermark_and_reencode(ffmpeg, src, essence, payload, args.crf, w, h, fps, nframes)
+            watermark_and_reencode(ffmpeg, src, essence, payload, args.crf, w, h, fps,
+                                   nframes, audio=audio)
         c2pa_sign(signer, essence, staged, dst.name)
 
         problems = verify(ffprobe, staged, payload, watermarked=not args.no_watermark,
-                          leaf_serial=leaf_serial)
+                          leaf_serial=leaf_serial, expect_audio=bool(audio))
         if problems:
             for p in problems:
                 print("PROBLEM: " + p)
