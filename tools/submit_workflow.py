@@ -421,13 +421,16 @@ def expected_video_contract(prompt):
     WanAnimateToVideo.length bzw. RIFE: Input-Frames x multiplier."""
     fps = frames = None
     mult = video_in = None
+    n_wan = sum(1 for n in prompt.values() if n.get("class_type") == "WanAnimateToVideo")
     for n in prompt.values():
         ct = n.get("class_type", "")
         ins = n.get("inputs", {})
         if ct == "VHS_VideoCombine":
             fps = _lit(ins.get("frame_rate"))
         elif ct == "WanAnimateToVideo":
-            frames = _lit(ins.get("length"))
+            # Chain-Graphen (>1 Wan-Node, Chunk-Continuation): Gesamt-Framezahl
+            # haengt von der Overlap-Semantik ab -> nur fps pruefen.
+            frames = _lit(ins.get("length")) if n_wan == 1 else None
         elif "RIFE" in ct:
             mult = _lit(ins.get("multiplier"))
         elif ct == "VHS_LoadVideo" and isinstance(ins.get("video"), str):

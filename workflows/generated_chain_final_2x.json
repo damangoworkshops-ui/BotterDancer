@@ -1,0 +1,301 @@
+{
+ "prompt": {
+  "10": {
+   "class_type": "UNETLoader",
+   "inputs": {
+    "unet_name": "wan2.2_animate_14B_bf16.safetensors",
+    "weight_dtype": "default"
+   }
+  },
+  "11": {
+   "class_type": "ModelSamplingSD3",
+   "inputs": {
+    "model": [
+     "10",
+     0
+    ],
+    "shift": 8.0
+   }
+  },
+  "12": {
+   "class_type": "CLIPLoader",
+   "inputs": {
+    "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "type": "wan"
+   }
+  },
+  "13": {
+   "class_type": "CLIPTextEncode",
+   "inputs": {
+    "clip": [
+     "12",
+     0
+    ],
+    "text": "a fluffy colorful creature dancing, full body, studio, sharp focus, high quality"
+   }
+  },
+  "14": {
+   "class_type": "CLIPTextEncode",
+   "inputs": {
+    "clip": [
+     "12",
+     0
+    ],
+    "text": "low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, multiple people, human"
+   }
+  },
+  "15": {
+   "class_type": "VAELoader",
+   "inputs": {
+    "vae_name": "wan_2.1_vae.safetensors"
+   }
+  },
+  "16": {
+   "class_type": "CLIPVisionLoader",
+   "inputs": {
+    "clip_name": "clip_vision_h.safetensors"
+   }
+  },
+  "17": {
+   "class_type": "LoadImage",
+   "inputs": {
+    "image": "creature_ref.png"
+   }
+  },
+  "18": {
+   "class_type": "CLIPVisionEncode",
+   "inputs": {
+    "clip_vision": [
+     "16",
+     0
+    ],
+    "image": [
+     "17",
+     0
+    ],
+    "crop": "none"
+   }
+  },
+  "20": {
+   "class_type": "VHS_LoadImagesPath",
+   "inputs": {
+    "directory": "C:\\ComfyUI\\input\\botter_pose_chain",
+    "image_load_cap": 160,
+    "skip_first_images": 0,
+    "select_every_nth": 1
+   }
+  },
+  "30": {
+   "class_type": "WanAnimateToVideo",
+   "inputs": {
+    "positive": [
+     "13",
+     0
+    ],
+    "negative": [
+     "14",
+     0
+    ],
+    "vae": [
+     "15",
+     0
+    ],
+    "width": 512,
+    "height": 768,
+    "length": 81,
+    "batch_size": 1,
+    "continue_motion_max_frames": 5,
+    "video_frame_offset": 0,
+    "clip_vision_output": [
+     "18",
+     0
+    ],
+    "reference_image": [
+     "17",
+     0
+    ],
+    "pose_video": [
+     "20",
+     0
+    ]
+   }
+  },
+  "31": {
+   "class_type": "KSampler",
+   "inputs": {
+    "model": [
+     "11",
+     0
+    ],
+    "positive": [
+     "30",
+     0
+    ],
+    "negative": [
+     "30",
+     1
+    ],
+    "latent_image": [
+     "30",
+     2
+    ],
+    "seed": 42,
+    "steps": 20,
+    "cfg": 4.0,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1.0
+   }
+  },
+  "35": {
+   "class_type": "TrimVideoLatent",
+   "inputs": {
+    "samples": [
+     "31",
+     0
+    ],
+    "trim_amount": [
+     "30",
+     3
+    ]
+   }
+  },
+  "32": {
+   "class_type": "VAEDecode",
+   "inputs": {
+    "samples": [
+     "35",
+     0
+    ],
+    "vae": [
+     "15",
+     0
+    ]
+   }
+  },
+  "33": {
+   "class_type": "VHS_VideoCombine",
+   "inputs": {
+    "images": [
+     "batch01",
+     0
+    ],
+    "frame_rate": 16,
+    "loop_count": 0,
+    "filename_prefix": "chain_final",
+    "format": "video/h264-mp4",
+    "pingpong": false,
+    "save_output": true,
+    "save_metadata": false
+   }
+  },
+  "3001": {
+   "class_type": "WanAnimateToVideo",
+   "inputs": {
+    "positive": [
+     "13",
+     0
+    ],
+    "negative": [
+     "14",
+     0
+    ],
+    "vae": [
+     "15",
+     0
+    ],
+    "width": 512,
+    "height": 768,
+    "length": 81,
+    "batch_size": 1,
+    "continue_motion_max_frames": 5,
+    "video_frame_offset": [
+     "30",
+     5
+    ],
+    "clip_vision_output": [
+     "18",
+     0
+    ],
+    "reference_image": [
+     "17",
+     0
+    ],
+    "pose_video": [
+     "20",
+     0
+    ],
+    "continue_motion": [
+     "32",
+     0
+    ]
+   }
+  },
+  "3101": {
+   "class_type": "KSampler",
+   "inputs": {
+    "model": [
+     "11",
+     0
+    ],
+    "positive": [
+     "3001",
+     0
+    ],
+    "negative": [
+     "3001",
+     1
+    ],
+    "latent_image": [
+     "3001",
+     2
+    ],
+    "seed": 42,
+    "steps": 20,
+    "cfg": 4.0,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1.0
+   }
+  },
+  "3501": {
+   "class_type": "TrimVideoLatent",
+   "inputs": {
+    "samples": [
+     "3101",
+     0
+    ],
+    "trim_amount": [
+     "3001",
+     3
+    ]
+   }
+  },
+  "3201": {
+   "class_type": "VAEDecode",
+   "inputs": {
+    "samples": [
+     "3501",
+     0
+    ],
+    "vae": [
+     "15",
+     0
+    ]
+   }
+  },
+  "batch01": {
+   "class_type": "ImageBatch",
+   "inputs": {
+    "image1": [
+     "32",
+     0
+    ],
+    "image2": [
+     "3201",
+     0
+    ]
+   }
+  }
+ }
+}
