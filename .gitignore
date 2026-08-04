@@ -16,3 +16,6 @@ __pycache__/
 *.bak
 *.tmp
 *.lock
+
+# Audio-Analyse-venv (lokal)
+.venv-audio/

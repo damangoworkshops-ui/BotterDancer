@@ -131,8 +131,24 @@ def main():
     # Anker-Raster: Beats des Tracks, unterteilt (--tatum 2 = Achtel). Echte
     # Choreo synkopiert — Hits auf Offbeats sind musikalisch richtig und
     # duerfen nicht auf den naechsten Viertel-Beat gezerrt werden.
-    tatum_period = 60.0 / float(grid["bpm"]) / args.tatum
-    beats = np.arange(float(grid.get("offset_s", 0.0)), duration + 0.25, tatum_period)
+    # Echte Songs (Beat This!) haben Tempo-Wobble: liegt eine echte Beat-Liste
+    # im Grid, wird GEGEN SIE geankert (Intervalle einzeln unterteilt) statt
+    # gegen ein starres bpm-Raster; Vor-/Nachlauf mit Median-Intervall ergaenzt.
+    gb = np.asarray([b for b in grid.get("beats", []) if 0.0 <= b <= duration + 0.5],
+                    dtype=float)
+    if len(gb) >= 3:
+        med = float(np.median(np.diff(gb)))
+        pre = np.arange(gb[0] - med, -1e-9, -med)[::-1] if gb[0] > 0.5 * med else np.empty(0)
+        post = np.arange(gb[-1] + med, duration + 0.25, med)
+        q = np.concatenate([pre, gb, post])
+        beats = np.concatenate(
+            [np.linspace(q[i], q[i + 1], args.tatum, endpoint=False)
+             for i in range(len(q) - 1)] + [q[-1:]])
+        print(f"[warp] Anker-Raster aus ECHTER Beat-Liste ({len(gb)} Beats, "
+              f"Median-Intervall {med:.3f}s, Tempo-Wobble erhalten)")
+    else:
+        tatum_period = 60.0 / float(grid["bpm"]) / args.tatum
+        beats = np.arange(float(grid.get("offset_s", 0.0)), duration + 0.25, tatum_period)
     strong = select_strongest(accents, speed, fps, args.anchors)
     err_before = alignment_error(strong, beats)
     skate_before = foot_skate(j17, fps)
