@@ -49,6 +49,9 @@ from hmr4d.utils.geo.hmr_cam import create_camera_sensor  # noqa: E402
 from custom_controlnet_aux.dwpose import decode_json_as_poses, draw_poses  # noqa: E402
 from PIL import Image  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cam_trajectory import EASINGS, trajectory  # noqa: E402
+
 # COCO17 (Standard-Reihenfolge, verifiziert via wis3d_utils.py KINEMATIC_CHAINS["coco17"]
 # + hmr4d/utils/vis/cv2_utils.py) -> OpenPose-18 Index (verifiziert via dwpose/util.py
 # limbSeq: 1=Nase,2=Nacken,3=RSchulter,4=RElbogen,5=RHandgelenk,6=LSchulter,7=LElbogen,
@@ -170,6 +173,19 @@ def main():
     ap.add_argument("--elevation", type=float, default=10.0, help="Grad ueber der Horizontalen [-85..85]")
     ap.add_argument("--distance-scale", type=float, default=1.0,
                     help="Zusatzfaktor auf die FOV-basierte Mindestdistanz (1.0 = ganze Szene sicher im Bild)")
+    # One-Shot-Trajektorien (04.08.): *-end macht den Parameter zum geeasten
+    # Verlauf ueber die volle Sequenz -> virtuelle Steadicam/Crane statt Schnitt.
+    # Ein One-Shot ist EINE Generation, d.h. Identitaets-Drift entfaellt
+    # konstruktionsbedingt. Referenz-Sektor beachten: Front-Referenz traegt
+    # ~0-120 Grad, Rueck-Referenz den Rest — Boegen pro Take, kein Vollkreis.
+    ap.add_argument("--azimuth-end", type=float, default=None,
+                    help="Azimut am Shot-Ende (aktiviert Kamerafahrt)")
+    ap.add_argument("--elevation-end", type=float, default=None,
+                    help="Elevation am Shot-Ende (Crane-Move)")
+    ap.add_argument("--distance-scale-end", type=float, default=None,
+                    help="Distanz-Skala am Shot-Ende (Push-in/Pull-out)")
+    ap.add_argument("--easing", choices=list(EASINGS), default="smoothstep",
+                    help="Verlaufsform der Kamerafahrt (smoothstep = ruckfrei anfahren/ausrollen)")
     ap.add_argument("--width", type=int, default=512)
     ap.add_argument("--height", type=int, default=768)
     ap.add_argument("--focal-mm", type=float, default=30.0)
@@ -179,9 +195,10 @@ def main():
     ap.add_argument("--src-fps", type=float, default=30000.0 / 1001.0,
                     help="fps des Quellvideos, auf dem GVHMR lief (Default: NTSC 29.97002997)")
     args = ap.parse_args()
-    if not (-85.0 <= args.elevation <= 85.0):
-        ap.error(f"--elevation {args.elevation} ausserhalb [-85, 85]: bei +/-90 ist die "
-                 f"Look-at-Basis degeneriert (Nullvektor-Normierung -> NaN-Keypoints).")
+    for label, val in (("--elevation", args.elevation), ("--elevation-end", args.elevation_end)):
+        if val is not None and not (-85.0 <= val <= 85.0):
+            ap.error(f"{label} {val} ausserhalb [-85, 85]: bei +/-90 ist die "
+                     f"Look-at-Basis degeneriert (Nullvektor-Normierung -> NaN-Keypoints).")
     if os.path.lexists(args.outdir) and not os.path.isdir(args.outdir):
         # Frueh pruefen (z.B. Sidecar .meta.json als --outdir vertippt) — nicht erst
         # nach Minuten SMPL-Forward mit rohem Traceback sterben.
@@ -232,18 +249,29 @@ def main():
     center = j17_np.reshape(-1, 3).mean(axis=0)
     extent = np.linalg.norm(j17_np.reshape(-1, 3) - center, axis=-1).max()
     half_fov_min = np.arctan(min(cx / fx, cy / fy))
-    distance = max(extent / np.sin(half_fov_min) * 1.05 * args.distance_scale, 1.0)
 
-    az = np.radians(args.azimuth)
-    el = np.radians(args.elevation)
-    eye = center + distance * np.array(
-        [np.sin(az) * np.cos(el), np.sin(el), np.cos(az) * np.cos(el)]
-    )
-    R_w2c, t_w2c = look_at_R_t(eye, center)
-    R_t = torch.from_numpy(R_w2c).float().to(device)
-    t_t = torch.from_numpy(t_w2c).float().to(device)
+    # Trajektorien ueber die VOLLE Quell-Sequenz (Resampling waehlt danach dieselben
+    # Frames wie fuers Pose-Rendern -> Kamera und Motion bleiben exakt synchron).
+    # Ohne *-end-Argumente sind alle Verlaeufe konstant = exakt das Altverhalten.
+    az_deg = trajectory(n_frames, args.azimuth, args.azimuth_end, args.easing)
+    el_deg = trajectory(n_frames, args.elevation, args.elevation_end, args.easing)
+    dscale = trajectory(n_frames, args.distance_scale, args.distance_scale_end, args.easing)
+    az = np.radians(az_deg)
+    el = np.radians(el_deg)
+    base_dist = extent / np.sin(half_fov_min) * 1.05
+    distance = np.maximum(base_dist * dscale, 1.0)  # (F,)
 
-    j17_cam = torch.einsum("ij,fkj->fki", R_t, j17) + t_t  # (F, 17, 3) im Kamera-Frame
+    eye = center[None, :] + distance[:, None] * np.stack(
+        [np.sin(az) * np.cos(el), np.sin(el), np.cos(az) * np.cos(el)], axis=-1
+    )  # (F, 3)
+    R_stack = np.empty((n_frames, 3, 3))
+    t_stack = np.empty((n_frames, 3))
+    for f in range(n_frames):
+        R_stack[f], t_stack[f] = look_at_R_t(eye[f], center)
+    R_all = torch.from_numpy(R_stack).float().to(device)
+    t_all = torch.from_numpy(t_stack).float().to(device)
+
+    j17_cam = torch.einsum("fij,fkj->fki", R_all, j17) + t_all[:, None, :]  # (F, 17, 3)
     p2d = project_p2d(j17_cam, K.expand(n_frames, -1, -1))  # (F, 17, 2), Pixel-Koordinaten
     p2d_np = p2d.cpu().numpy()
 
@@ -269,9 +297,17 @@ def main():
               f"Nichts geschrieben, alter Output bleibt.", file=sys.stderr)
         sys.exit(4)
 
-    print(f"[reproject] Kamera: azimuth={args.azimuth} elevation={args.elevation} "
-          f"distance={distance:.2f}m (extent {extent:.2f}m, hfov {np.degrees(half_fov_min):.1f} Grad) "
-          f"eye={eye.round(2).tolist()}")
+    moving = any(v is not None for v in (args.azimuth_end, args.elevation_end,
+                                         args.distance_scale_end))
+    if moving:
+        print(f"[reproject] Kamerafahrt ({args.easing}): azimuth {az_deg[0]:.0f}->{az_deg[-1]:.0f} "
+              f"elevation {el_deg[0]:.0f}->{el_deg[-1]:.0f} "
+              f"distance {distance[0]:.2f}->{distance[-1]:.2f}m "
+              f"(extent {extent:.2f}m, hfov {np.degrees(half_fov_min):.1f} Grad)")
+    else:
+        print(f"[reproject] Kamera: azimuth={args.azimuth} elevation={args.elevation} "
+              f"distance={distance[0]:.2f}m (extent {extent:.2f}m, hfov "
+              f"{np.degrees(half_fov_min):.1f} Grad) eye={eye[0].round(2).tolist()}")
 
     # --- 3b. Pro-Frame Gesichts-Sichtbarkeit: Blickrichtung des Koerpers vs. Kamera-Richtung.
     #     Loest den 180 Grad-Bug (Gesichts-Keypoints wurden bisher IMMER gezeichnet, auch bei
@@ -281,8 +317,8 @@ def main():
     shoulders_l, shoulders_r = j24_np[:, 16, [0, 2]], j24_np[:, 17, [0, 2]]
     facing_z = compute_facing_z(hips_l, hips_r, shoulders_l, shoulders_r)  # (F,2) in (x,z)
     pelvis_xz = j24_np[:, 0, [0, 2]]  # (F,2)
-    eye_xz = eye[[0, 2]]
-    view_dir = eye_xz[None, :] - pelvis_xz  # (F,2), Charakter -> Kamera
+    eye_xz = eye[:, [0, 2]]  # (F,2) — bei Kamerafahrt pro Frame verschieden
+    view_dir = eye_xz - pelvis_xz  # (F,2), Charakter -> Kamera
     view_dir = view_dir / np.linalg.norm(view_dir, axis=-1, keepdims=True).clip(min=1e-6)
     face_dot = (facing_z * view_dir).sum(axis=-1)  # (F,), >0 = Gesicht zeigt zur Kamera
     rl0 = float(np.linalg.norm((hips_l[0] - hips_r[0]) + (shoulders_l[0] - shoulders_r[0])))
@@ -357,9 +393,13 @@ def main():
             "n_frames": len(sel),
             "resample": {"src_fps": args.src_fps, "target_fps": args.target_fps,
                          "mode": "vhs-force-rate-accumulator"},
-            "camera": {"azimuth": args.azimuth, "elevation": args.elevation,
-                       "distance": float(distance), "distance_scale": args.distance_scale,
-                       "eye": eye.tolist(), "center": center.tolist(),
+            "camera": {"azimuth": [float(az_deg[0]), float(az_deg[-1])],
+                       "elevation": [float(el_deg[0]), float(el_deg[-1])],
+                       "distance": [float(distance[0]), float(distance[-1])],
+                       "distance_scale": [float(dscale[0]), float(dscale[-1])],
+                       "easing": args.easing, "moving": bool(moving),
+                       "eye_start": eye[0].tolist(), "eye_end": eye[-1].tolist(),
+                       "center": center.tolist(),
                        "basis": "right-handed det+1 (Spiegelungs-Fix 2026-07-19)"},
             "canvas": [args.width, args.height],
             "clipped_keypoints": n_clipped,
