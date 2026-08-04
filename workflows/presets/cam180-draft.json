@@ -5,8 +5,8 @@
         "20.directory=C:\\ComfyUI\\input\\botter_pose_cam180_v3",
         "33.filename_prefix=botter_cam180_draft",
         "17.image=creature_ref_back_v2.png",
-        "13.text=a fluffy colorful creature dancing seen from behind, rear view, back of the head, fluffy tail visible, full body, studio, sharp focus, high quality",
-        "14.text=face, eyes, frontal view, looking at camera, low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, multiple people, human"
+        "13.text=a fluffy colorful creature dancing seen from behind, rear view, back of the head with two curved ribbed salmon-pink horns on top of the head, fluffy furry arms, fluffy tail visible, full body, studio, sharp focus, high quality",
+        "14.text=face, eyes, frontal view, looking at camera, horns on arms, ribbed arms, striped arms, low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, multiple people, human"
     ],
     "angle": 180,
     "profile": "draft"
