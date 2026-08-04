@@ -435,7 +435,11 @@ def expected_video_contract(prompt):
     if frames is None and mult and video_in and os.path.isfile(video_in):
         info = ffprobe_video(video_in)
         if info and info["frames"]:
-            frames = int(info["frames"] * mult)
+            # RIFE interpoliert ZWISCHEN Frames, extrapoliert nicht ueber den
+            # letzten hinaus: N Input -> N*mult-(mult-1) Output (81 -> 161 bei x2;
+            # deckt sich mit dem validierten Juli-Lauf). Naives N*mult liess den
+            # Vertrag am korrekten Output scheitern (04.08. live erwischt).
+            frames = int(info["frames"] * mult - (mult - 1))
     return fps, frames
 
 

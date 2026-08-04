@@ -212,6 +212,19 @@ class TestVideoArtefaktvertrag(unittest.TestCase):
         problems = sw.check_video_postconditions(self._graph(16, 81), [self.v16])
         self.assertTrue(any("81" in p for p in problems), problems)
 
+    def test_rife_frame_semantik(self):
+        """RIFE: N Input-Frames -> N*mult-(mult-1) Output (interpoliert nur
+        ZWISCHEN Frames; 81->161 im validierten Juli-Lauf, live bestaetigt 04.08.)."""
+        graph = {
+            "1": {"class_type": "VHS_LoadVideo", "inputs": {"video": self.v16,
+                                                            "force_rate": 0}},
+            "2": {"class_type": "RIFE VFI", "inputs": {"multiplier": 2}},
+            "3": {"class_type": "VHS_VideoCombine", "inputs": {"frame_rate": 32}},
+        }
+        fps, frames = sw.expected_video_contract(graph)
+        self.assertEqual(fps, 32)
+        self.assertEqual(frames, 8 * 2 - 1)
+
 
 if __name__ == "__main__":
     unittest.main()
