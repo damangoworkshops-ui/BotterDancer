@@ -75,7 +75,10 @@ def add(buf, start_s, sig):
 def main():
     ap = argparse.ArgumentParser(description="Rechtefreier Beat-Track mit exaktem Beat-Grid")
     ap.add_argument("--bpm", type=float, default=128.0)
-    ap.add_argument("--duration", type=float, default=6.0, help="Sekunden")
+    ap.add_argument("--duration", type=float, default=6.0, help="Sekunden (inkl. Offset)")
+    ap.add_argument("--offset", type=float, default=0.0,
+                    help="Stille vor dem ersten Beat (Sekunden) — Phasenlage des Grids, "
+                         "damit die Beats auf den Bewegungs-Akzenten liegen (motion_warp --analyze)")
     ap.add_argument("--out", required=True, help="Ziel-WAV")
     ap.add_argument("--seed", type=int, default=1, help="Variation der Bass-Figur")
     args = ap.parse_args()
@@ -89,7 +92,7 @@ def main():
     rng = np.random.default_rng(args.seed)
     # A-Moll-Figur auf Achteln: Grundton dominiert, Terz/Septime als Wuerze
     scale = [55.0, 55.0, 65.41, 55.0, 49.0, 55.0, 65.41, 73.42]
-    while (t0 := b * beat) < args.duration:
+    while (t0 := args.offset + b * beat) < args.duration:
         beats.append(round(t0, 6))
         add(buf, t0, kick())
         if b % 2 == 1:
@@ -120,7 +123,7 @@ def main():
         w.setframerate(SR)
         w.writeframes(stereo.tobytes())
 
-    grid = {"bpm": args.bpm, "offset_s": 0.0, "duration_s": args.duration,
+    grid = {"bpm": args.bpm, "offset_s": args.offset, "duration_s": args.duration,
             "beats": beats, "source": "synthetic (make_beat_track.py, rechtefrei)"}
     grid_path = out.with_suffix(out.suffix + ".beats.json")
     with open(grid_path, "w") as f:
