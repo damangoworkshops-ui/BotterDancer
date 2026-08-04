@@ -1,0 +1,18 @@
+# Niemals committen: privates C2PA-Signaturmaterial
+assets/keys/
+
+# Persoenliche Medien + daraus abgeleitete Motion-Daten (Urheberrecht:
+# Treibervideo zeigt echte Taenzer; Choreographie ist schutzfaehig, par. 2(1)3 UrhG)
+assets/
+
+# Session-Logs (lokal, nicht relevant fuers Repo)
+logs/
+
+# Python
+__pycache__/
+*.pyc
+
+# Backups/Temporaeres
+*.bak
+*.tmp
+*.lock

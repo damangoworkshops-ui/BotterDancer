@@ -1,0 +1,10 @@
+{
+    "workflow": "wan_animate_draft.json",
+    "description": "Kamera 90 Grad auf dem v3-Pose-Set (16fps-Resample + Spiegelungs-Fix 2026-07-19); ACHTUNG: nutzt noch Frontal-Referenz/-Prompt fuer Seitenansicht (offenes Experiment, Audit C) [draft]",
+    "set": [
+        "20.directory=C:\\ComfyUI\\input\\botter_pose_cam90_v3",
+        "33.filename_prefix=botter_cam90_draft"
+    ],
+    "angle": 90,
+    "profile": "draft"
+}

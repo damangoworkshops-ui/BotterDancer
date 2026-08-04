@@ -1,0 +1,522 @@
+diff --git a/hmr4d/dataset/bedlam/bedlam.py b/hmr4d/dataset/bedlam/bedlam.py
+index 52b75ef..09fd376 100644
+--- a/hmr4d/dataset/bedlam/bedlam.py
++++ b/hmr4d/dataset/bedlam/bedlam.py
+@@ -2,7 +2,11 @@ from pathlib import Path
+ import numpy as np
+ import torch
+ from hmr4d.utils.pylogger import Log
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = None
+ from time import time
+ 
+ from hmr4d.configs import MainStore, builds
+diff --git a/hmr4d/dataset/emdb/emdb_motion_test.py b/hmr4d/dataset/emdb/emdb_motion_test.py
+index 1a2e81c..f49e364 100644
+--- a/hmr4d/dataset/emdb/emdb_motion_test.py
++++ b/hmr4d/dataset/emdb/emdb_motion_test.py
+@@ -6,7 +6,11 @@ from hmr4d.utils.pylogger import Log
+ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
+ 
+ from hmr4d.utils.geo_transform import compute_cam_angvel
+-from pytorch3d.transforms import quaternion_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import quaternion_to_matrix
++except ImportError:
++    quaternion_to_matrix = None
+ from hmr4d.utils.geo.hmr_cam import estimate_K, resize_K
+ from hmr4d.utils.geo.flip_utils import flip_kp2d_coco17
+ 
+diff --git a/hmr4d/dataset/h36m/h36m.py b/hmr4d/dataset/h36m/h36m.py
+index 5370b0d..d3ae8b4 100644
+--- a/hmr4d/dataset/h36m/h36m.py
++++ b/hmr4d/dataset/h36m/h36m.py
+@@ -5,7 +5,11 @@ from hmr4d.configs import MainStore, builds
+ 
+ from hmr4d.utils.pylogger import Log
+ from hmr4d.dataset.imgfeat_motion.base_dataset import ImgfeatMotionDatasetBase
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = None
+ from hmr4d.utils import matrix
+ from hmr4d.utils.smplx_utils import make_smplx
+ from tqdm import tqdm
+diff --git a/hmr4d/dataset/pure_motion/cam_traj_utils.py b/hmr4d/dataset/pure_motion/cam_traj_utils.py
+index 71b0aff..f1103b8 100644
+--- a/hmr4d/dataset/pure_motion/cam_traj_utils.py
++++ b/hmr4d/dataset/pure_motion/cam_traj_utils.py
+@@ -2,12 +2,16 @@ import torch
+ import torch.nn.functional as F
+ import numpy as np
+ from numpy.random import rand, randn
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     axis_angle_to_matrix,
+     matrix_to_axis_angle,
+     matrix_to_rotation_6d,
+     rotation_6d_to_matrix,
+ )
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = matrix_to_rotation_6d = rotation_6d_to_matrix = None
+ from einops import rearrange
+ from hmr4d.utils.geo.hmr_cam import create_camera_sensor
+ from hmr4d.utils.geo_transform import transform_mat, apply_T_on_points
+diff --git a/hmr4d/dataset/pure_motion/utils.py b/hmr4d/dataset/pure_motion/utils.py
+index 9466296..d3a0c58 100644
+--- a/hmr4d/dataset/pure_motion/utils.py
++++ b/hmr4d/dataset/pure_motion/utils.py
+@@ -1,11 +1,15 @@
+ import torch
+ import torch.nn.functional as F
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     axis_angle_to_matrix,
+     matrix_to_axis_angle,
+     matrix_to_rotation_6d,
+     rotation_6d_to_matrix,
+ )
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = matrix_to_rotation_6d = rotation_6d_to_matrix = None
+ from einops import rearrange
+ 
+ 
+diff --git a/hmr4d/dataset/rich/rich_motion_test.py b/hmr4d/dataset/rich/rich_motion_test.py
+index e21a96b..783e419 100644
+--- a/hmr4d/dataset/rich/rich_motion_test.py
++++ b/hmr4d/dataset/rich/rich_motion_test.py
+@@ -13,7 +13,11 @@ from .rich_utils import (
+ from hmr4d.utils.geo_transform import apply_T_on_points, transform_mat, compute_cam_angvel
+ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines
+ from hmr4d.utils.smplx_utils import make_smplx
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = None
+ from hmr4d.utils.geo.hmr_cam import resize_K
+ 
+ 
+diff --git a/hmr4d/model/gvhmr/callbacks/metric_rich.py b/hmr4d/model/gvhmr/callbacks/metric_rich.py
+index f60c9b5..084bb42 100644
+--- a/hmr4d/model/gvhmr/callbacks/metric_rich.py
++++ b/hmr4d/model/gvhmr/callbacks/metric_rich.py
+@@ -17,7 +17,11 @@ from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+ from hmr4d.utils.smplx_utils import make_smplx
+ from einops import einsum, rearrange
+ 
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = None
+ from hmr4d.utils.wis3d_utils import make_wis3d, add_motion_as_lines, get_colors_by_conf
+ from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
+ from hmr4d.utils.geo.hmr_cam import estimate_focal_length
+diff --git a/hmr4d/model/gvhmr/pipeline/gvhmr_pipeline.py b/hmr4d/model/gvhmr/pipeline/gvhmr_pipeline.py
+index 9e99b22..80223eb 100644
+--- a/hmr4d/model/gvhmr/pipeline/gvhmr_pipeline.py
++++ b/hmr4d/model/gvhmr/pipeline/gvhmr_pipeline.py
+@@ -16,12 +16,16 @@ from hmr4d.model.gvhmr.utils.postprocess import (
+ )
+ from hmr4d.model.gvhmr.utils import stats_compose
+ 
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     matrix_to_rotation_6d,
+     rotation_6d_to_matrix,
+     axis_angle_to_matrix,
+     matrix_to_axis_angle,
+ )
++except ImportError:
++    matrix_to_rotation_6d = rotation_6d_to_matrix = axis_angle_to_matrix = matrix_to_axis_angle = None
+ from hmr4d.utils.geo.hmr_cam import compute_bbox_info_bedlam, compute_transl_full_cam, get_a_pred_cam, project_to_bi01
+ from hmr4d.utils.geo.hmr_global import (
+     rollout_local_transl_vel,
+diff --git a/hmr4d/model/gvhmr/utils/endecoder.py b/hmr4d/model/gvhmr/utils/endecoder.py
+index 223cb6d..bbf964f 100644
+--- a/hmr4d/model/gvhmr/utils/endecoder.py
++++ b/hmr4d/model/gvhmr/utils/endecoder.py
+@@ -1,6 +1,8 @@
+ import torch
+ import torch.nn as nn
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     rotation_6d_to_matrix,
+     matrix_to_axis_angle,
+     axis_angle_to_matrix,
+@@ -8,6 +10,8 @@ from pytorch3d.transforms import (
+     matrix_to_quaternion,
+     quaternion_to_matrix,
+ )
++except ImportError:
++    rotation_6d_to_matrix = matrix_to_axis_angle = axis_angle_to_matrix = matrix_to_rotation_6d = matrix_to_quaternion = quaternion_to_matrix = None
+ from hmr4d.configs import MainStore, builds
+ from hmr4d.utils.geo.augment_noisy_pose import gaussian_augment
+ import hmr4d.utils.matrix as matrix
+diff --git a/hmr4d/model/gvhmr/utils/postprocess.py b/hmr4d/model/gvhmr/utils/postprocess.py
+index 9605c52..185b310 100644
+--- a/hmr4d/model/gvhmr/utils/postprocess.py
++++ b/hmr4d/model/gvhmr/utils/postprocess.py
+@@ -1,11 +1,15 @@
+ import torch
+ from torch.cuda.amp import autocast
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     matrix_to_rotation_6d,
+     rotation_6d_to_matrix,
+     axis_angle_to_matrix,
+     matrix_to_axis_angle,
+ )
++except ImportError:
++    matrix_to_rotation_6d = rotation_6d_to_matrix = axis_angle_to_matrix = matrix_to_axis_angle = None
+ 
+ import hmr4d.utils.matrix as matrix
+ from hmr4d.utils.ik.ccd_ik import CCD_IK
+diff --git a/hmr4d/network/hmr2/hmr2.py b/hmr4d/network/hmr2/hmr2.py
+index b018fb8..6a3ecdb 100644
+--- a/hmr4d/network/hmr2/hmr2.py
++++ b/hmr4d/network/hmr2/hmr2.py
+@@ -4,7 +4,11 @@ from yacs.config import CfgNode
+ from .vit import ViT
+ from .smpl_head import SMPLTransformerDecoderHead
+ 
+-from pytorch3d.transforms import matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import matrix_to_axis_angle
++except ImportError:
++    matrix_to_axis_angle = None
+ from hmr4d.utils.geo.hmr_cam import compute_transl_full_cam
+ 
+ 
+diff --git a/hmr4d/utils/body_model/min_lbs.py b/hmr4d/utils/body_model/min_lbs.py
+index 8c7fbd9..59793cd 100644
+--- a/hmr4d/utils/body_model/min_lbs.py
++++ b/hmr4d/utils/body_model/min_lbs.py
+@@ -2,7 +2,11 @@ import numpy as np
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+-from pytorch3d.transforms import axis_angle_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix
++except ImportError:
++    axis_angle_to_matrix = None
+ from smplx.utils import Struct, to_np, to_tensor
+ from hmr4d.utils.smplx_utils import forward_kinematics_motion
+ 
+diff --git a/hmr4d/utils/body_model/smpl_lite.py b/hmr4d/utils/body_model/smpl_lite.py
+index 4e84fc7..15dcb29 100644
+--- a/hmr4d/utils/body_model/smpl_lite.py
++++ b/hmr4d/utils/body_model/smpl_lite.py
+@@ -3,7 +3,11 @@ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+ from pathlib import Path
+-from pytorch3d.transforms import axis_angle_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix
++except ImportError:
++    axis_angle_to_matrix = None
+ from smplx.utils import Struct, to_np, to_tensor
+ from einops import einsum, rearrange
+ from time import time
+diff --git a/hmr4d/utils/body_model/smplx_lite.py b/hmr4d/utils/body_model/smplx_lite.py
+index 013a268..8474e97 100644
+--- a/hmr4d/utils/body_model/smplx_lite.py
++++ b/hmr4d/utils/body_model/smplx_lite.py
+@@ -3,7 +3,11 @@ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+ from pathlib import Path
+-from pytorch3d.transforms import axis_angle_to_matrix, rotation_6d_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, rotation_6d_to_matrix
++except ImportError:
++    axis_angle_to_matrix = rotation_6d_to_matrix = None
+ from smplx.utils import Struct, to_np, to_tensor
+ from einops import einsum, rearrange
+ from time import time
+diff --git a/hmr4d/utils/geo/augment_noisy_pose.py b/hmr4d/utils/geo/augment_noisy_pose.py
+index 3c8b9e5..488b532 100644
+--- a/hmr4d/utils/geo/augment_noisy_pose.py
++++ b/hmr4d/utils/geo/augment_noisy_pose.py
+@@ -1,5 +1,9 @@
+ import torch
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = matrix_to_rotation_6d = None
+ import hmr4d.utils.matrix as matrix
+ from hmr4d import PROJ_ROOT
+ 
+diff --git a/hmr4d/utils/geo/flip_utils.py b/hmr4d/utils/geo/flip_utils.py
+index 81fc815..44e1187 100644
+--- a/hmr4d/utils/geo/flip_utils.py
++++ b/hmr4d/utils/geo/flip_utils.py
+@@ -1,5 +1,9 @@
+ import torch
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = None
+ 
+ 
+ def flip_heatmap_coco17(output_flipped):
+diff --git a/hmr4d/utils/geo/hmr_global.py b/hmr4d/utils/geo/hmr_global.py
+index 5483370..28361c9 100644
+--- a/hmr4d/utils/geo/hmr_global.py
++++ b/hmr4d/utils/geo/hmr_global.py
+@@ -1,5 +1,9 @@
+ import torch
+-from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_quaternion, quaternion_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_axis_angle, matrix_to_quaternion, quaternion_to_matrix
++except ImportError:
++    axis_angle_to_matrix = matrix_to_axis_angle = matrix_to_quaternion = quaternion_to_matrix = None
+ import hmr4d.utils.matrix as matrix
+ from hmr4d.utils.net_utils import gaussian_smooth
+ 
+diff --git a/hmr4d/utils/geo_transform.py b/hmr4d/utils/geo_transform.py
+index 028cc35..642ef7a 100644
+--- a/hmr4d/utils/geo_transform.py
++++ b/hmr4d/utils/geo_transform.py
+@@ -2,11 +2,27 @@ import numpy as np
+ import cv2
+ import torch
+ import torch.nn.functional as F
+-from pytorch3d.transforms import so3_exp_map, so3_log_map
+-from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_axis_angle, matrix_to_rotation_6d
+-import pytorch3d.ops.knn as knn
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import so3_exp_map, so3_log_map
++except ImportError:
++    so3_exp_map = so3_log_map = None
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_axis_angle, matrix_to_rotation_6d
++except ImportError:
++    matrix_to_quaternion = quaternion_to_axis_angle = matrix_to_rotation_6d = None
++# [botterdancer-optional-pytorch3d]
++try:
++    import pytorch3d.ops.knn as knn
++except ImportError:
++    knn = None
+ from hmr4d.utils.pylogger import Log
+-from pytorch3d.transforms import euler_angles_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import euler_angles_to_matrix
++except ImportError:
++    euler_angles_to_matrix = None
+ import hmr4d.utils.matrix as matrix
+ from einops import einsum, rearrange, repeat
+ from hmr4d.utils.geo.quaternion import qbetween
+diff --git a/hmr4d/utils/ik/ccd_ik.py b/hmr4d/utils/ik/ccd_ik.py
+index 9bc606c..cee0b8d 100644
+--- a/hmr4d/utils/ik/ccd_ik.py
++++ b/hmr4d/utils/ik/ccd_ik.py
+@@ -4,7 +4,9 @@ import torch.nn as nn
+ import torch.nn.functional as F
+ from einops import einsum, rearrange, repeat
+ 
+-from pytorch3d.transforms import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import (
+     matrix_to_rotation_6d,
+     rotation_6d_to_matrix,
+     axis_angle_to_matrix,
+@@ -12,6 +14,8 @@ from pytorch3d.transforms import (
+     quaternion_to_matrix,
+     matrix_to_quaternion,
+ )
++except ImportError:
++    matrix_to_rotation_6d = rotation_6d_to_matrix = axis_angle_to_matrix = matrix_to_axis_angle = quaternion_to_matrix = matrix_to_quaternion = None
+ import hmr4d.utils.matrix as matrix
+ from hmr4d.utils.geo.quaternion import qbetween, qslerp, qinv, qmul, qrot
+ 
+diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
+index f4d6232..cd81e62 100644
+--- a/hmr4d/utils/vis/renderer.py
++++ b/hmr4d/utils/vis/renderer.py
+@@ -2,7 +2,9 @@ import cv2
+ import torch
+ import numpy as np
+ 
+-from pytorch3d.renderer import (
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.renderer import (
+     PerspectiveCameras,
+     TexturesVertex,
+     PointLights,
+@@ -12,10 +14,28 @@ from pytorch3d.renderer import (
+     MeshRasterizer,
+     SoftPhongShader,
+ )
+-from pytorch3d.structures import Meshes
+-from pytorch3d.structures.meshes import join_meshes_as_scene
+-from pytorch3d.renderer.cameras import look_at_rotation
+-from pytorch3d.transforms import axis_angle_to_matrix
++except ImportError:
++    PerspectiveCameras = TexturesVertex = PointLights = Materials = RasterizationSettings = MeshRenderer = MeshRasterizer = SoftPhongShader = None
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.structures import Meshes
++except ImportError:
++    Meshes = None
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.structures.meshes import join_meshes_as_scene
++except ImportError:
++    join_meshes_as_scene = None
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.renderer.cameras import look_at_rotation
++except ImportError:
++    look_at_rotation = None
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix
++except ImportError:
++    axis_angle_to_matrix = None
+ 
+ from .renderer_tools import get_colors, checkerboard_geometry
+ 
+diff --git a/hmr4d/utils/wis3d_utils.py b/hmr4d/utils/wis3d_utils.py
+index df54d8b..77715b2 100644
+--- a/hmr4d/utils/wis3d_utils.py
++++ b/hmr4d/utils/wis3d_utils.py
+@@ -4,7 +4,11 @@ from datetime import datetime
+ import torch
+ import numpy as np
+ from einops import einsum
+-from pytorch3d.transforms import axis_angle_to_matrix
++# [botterdancer-optional-pytorch3d]
++try:
++    from pytorch3d.transforms import axis_angle_to_matrix
++except ImportError:
++    axis_angle_to_matrix = None
+ 
+ 
+ def make_wis3d(output_dir="outputs/wis3d", name="debug", time_postfix=False):
+diff --git a/tools/demo/demo.py b/tools/demo/demo.py
+index a10fb64..cba0961 100644
+--- a/tools/demo/demo.py
++++ b/tools/demo/demo.py
+@@ -7,7 +7,30 @@ from hmr4d.utils.pylogger import Log
+ import hydra
+ from hydra import initialize_config_module, compose
+ from pathlib import Path
+-from pytorch3d.transforms import quaternion_to_matrix
++
++# BotterDancer patch (2026-07-10): PyTorch 2.6+ defaults torch.load(weights_only=True),
++# which rejects legacy pickled checkpoints (ultralytics YOLO, ViTPose, ...) that predate
++# that change. These are our own downloaded checkpoints (camenduru/GVHMR mirror), not
++# untrusted input, and this is a private single-user local tool -> restoring the old
++# default here (once, at the entry point) is the pragmatic fix instead of patching every
++# torch.load call site across ultralytics/timm/lightning internals.
++_orig_torch_load = torch.load
++
++
++def _torch_load_weights_only_false(*args, **kwargs):
++    kwargs.setdefault("weights_only", False)
++    return _orig_torch_load(*args, **kwargs)
++
++
++torch.load = _torch_load_weights_only_false
++
++try:
++    from pytorch3d.transforms import quaternion_to_matrix
++except ImportError:
++    # pytorch3d not built for this env (Windows/Blackwell, no official wheel).
++    # Only needed for --use_dpvo (default: SimpleVO) and for render_incam/render_global,
++    # which we skip below for extraction-only use (BotterDancer patch, 2026-07-10).
++    quaternion_to_matrix = None
+ 
+ from hmr4d.configs import register_store_gvhmr
+ from hmr4d.utils.video_io_utils import (
+@@ -27,7 +50,12 @@ from hmr4d.utils.geo_transform import compute_cam_angvel
+ from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
+ from hmr4d.utils.net_utils import detach_to_cpu, to_cuda
+ from hmr4d.utils.smplx_utils import make_smplx
+-from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
++
++try:
++    from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
++except ImportError:
++    # renderer.py imports pytorch3d unconditionally; not available in this env (see above).
++    Renderer = get_global_cameras_static = get_ground_params_from_points = None
+ from tqdm import tqdm
+ from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+ from einops import einsum, rearrange
+@@ -180,6 +208,11 @@ def load_data_dict(cfg):
+     else:
+         traj = torch.load(cfg.paths.slam)
+         if cfg.use_dpvo:  # DPVO
++            if quaternion_to_matrix is None:
++                raise RuntimeError(
++                    "use_dpvo=True requires pytorch3d, which is not installed in this env. "
++                    "Use SimpleVO instead (default, i.e. omit --use_dpvo)."
++                )
+             traj_quat = torch.from_numpy(traj[:, [6, 3, 4, 5]])
+             R_w2c = quaternion_to_matrix(traj_quat).mT
+         else:  # SimpleVO
+@@ -326,9 +359,21 @@ if __name__ == "__main__":
+         Log.info(f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
+         torch.save(pred, paths.hmr4d_results)
+ 
+-    # ===== Render ===== #
+-    render_incam(cfg)
+-    render_global(cfg)
+-    if not Path(paths.incam_global_horiz_video).exists():
+-        Log.info("[Merge Videos]")
+-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
++    # ===== Render (debug-visualization only; needs pytorch3d) ===== #
++    # BotterDancer: motion params (paths.hmr4d_results, saved above) are all we need
++    # downstream — skip the mesh-overlay debug videos when pytorch3d isn't available.
++    try:
++        # BotterDancer note: check the COMPILED renderer submodule specifically, not bare
++        # `import pytorch3d` — a minimal transforms-only shim package exists in this env
++        # (see pytorch3d/__init__.py), so a bare import would succeed and wrongly try to
++        # render (which then fails on missing body_models/smpl, needed only for rendering).
++        import pytorch3d.renderer  # noqa: F401
++
++        render_incam(cfg)
++        render_global(cfg)
++        if not Path(paths.incam_global_horiz_video).exists():
++            Log.info("[Merge Videos]")
++            merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
++    except ImportError:
++        Log.info("[Render] Skipped (pytorch3d not installed) — motion data is saved at "
++                  f"{paths.hmr4d_results}, that's all BotterDancer needs.")

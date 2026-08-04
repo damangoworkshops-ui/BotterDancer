@@ -1,0 +1,66 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Flux1-dev laden" },
+    "inputs": { "unet_name": "flux1-dev.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "_meta": { "title": "CLIP (t5xxl fp8 + clip_l)" },
+    "inputs": { "clip_name1": "t5xxl_fp8_e4m3fn.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "ae-VAE" },
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Positiv-Prompt" },
+    "inputs": {
+      "text": "highly detailed 3D character render of an adorable small fantasy monster seen directly from behind, full rear view, head facing away from the camera, back of the head visible, no face visible, no eyes, the entire body completely covered in very long shaggy pastel rainbow fur, soft pink mint green pale yellow and white, long wild fur strands sticking out in all directions, big round head with messy long fur, two curved salmon-pink ribbed horns on top of the head, fuzzy peach-colored pointed ears, one very large bushy fox-like tail with long pastel fur reaching the floor, short furry arms, short furry legs with small peach-colored paws, kitten-like toddler proportions, standing upright on two legs, full body, light gray seamless studio background, soft even lighting, sharp focus, realistic fur simulation with individual strands",
+      "clip": ["2", 0]
+    }
+  },
+  "5": {
+    "class_type": "FluxGuidance",
+    "_meta": { "title": "Flux Guidance" },
+    "inputs": { "conditioning": ["4", 0], "guidance": 3.5 }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negativ (bei cfg 1.0 inaktiv)" },
+    "inputs": { "text": "", "clip": ["2", 0] }
+  },
+  "7": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": { "title": "Latent 832x1216 Batch 4" },
+    "inputs": { "width": 832, "height": 1216, "batch_size": 4 }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "_meta": { "title": "Sampler" },
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["7", 0],
+      "seed": 424242,
+      "steps": 28,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decode" },
+    "inputs": { "samples": ["8", 0], "vae": ["3", 0] }
+  },
+  "10": {
+    "class_type": "SaveImage",
+    "_meta": { "title": "Speichern" },
+    "inputs": { "images": ["9", 0], "filename_prefix": "creature_ref_back_flux" }
+  }
+}

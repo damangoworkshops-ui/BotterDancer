@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BotterDancer HUD</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --surface: #1a1a19; --panel: #232321; --panel-2: #2b2b29;
+    --ink: #ffffff; --ink-2: #c3c2b7; --ink-3: #8a897f;
+    --line: #38383520;
+    --seq: #3987e5;            /* Magnitude (VRAM/Util) — sequentielles Blau */
+    --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--surface); color: var(--ink); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; padding: 18px; }
+  h1 { font-size: 17px; font-weight: 600; letter-spacing: .3px; }
+  h2 { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  #clock { color: var(--ink-3); font-size: 12px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid #ffffff12; border-radius: 10px; padding: 14px 16px; }
+  /* Alerts */
+  #alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .alert { border-radius: 8px; padding: 9px 12px; display: flex; gap: 10px; align-items: center; font-weight: 500; border: 1px solid; }
+  .alert button { margin-left: auto; }
+  .alert.critical { background: #d03b3b22; border-color: var(--crit); }
+  .alert.serious  { background: #ec835a1e; border-color: var(--serious); }
+  .alert.warning  { background: #fab21916; border-color: var(--warn); }
+  .alert.info     { background: #3987e514; border-color: #3987e5; color: var(--ink-2); font-weight: 400; }
+  /* Meter */
+  .meter { margin: 8px 0 12px; }
+  .meter .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+  .meter .lbl b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--seq); border-radius: 4px 0 0 4px; transition: width .6s; }
+  .bar i.hot { background: var(--serious); }
+  .kpis { display: flex; gap: 18px; margin-top: 4px; }
+  .kpi { font-size: 12px; color: var(--ink-2); }
+  .kpi b { display: block; font-size: 17px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  canvas.spark { width: 100%; height: 44px; margin-top: 10px; }
+  /* Listen */
+  ul { list-style: none; }
+  .row { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #ffffff0a; font-size: 13px; }
+  .row:last-child { border-bottom: 0; }
+  .row .sub { color: var(--ink-3); font-size: 12px; margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: var(--panel-2); color: var(--ink-2); text-transform: uppercase; letter-spacing: .5px; }
+  .tag.fremd, .tag.llm { background: #d03b3b33; color: #ff9d9d; }
+  .ok    { color: var(--good); }
+  .bad   { color: var(--crit); }
+  .warn  { color: var(--warn); }
+  .muted { color: var(--ink-3); }
+  /* Progress */
+  #prog .bar { height: 14px; }
+  #prog .lbl b { font-size: 14px; }
+  /* Outputs */
+  #outlist .row { cursor: pointer; }
+  #outlist .row:hover { background: #ffffff08; }
+  #preview { margin-top: 10px; display: none; }
+  #preview video, #preview img { width: 100%; border-radius: 8px; background: #000; }
+  #preview .cap { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  /* Aktionen */
+  #actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button { background: var(--panel-2); color: var(--ink); border: 1px solid #ffffff1f; border-radius: 7px; padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { background: #343431; border-color: #ffffff40; }
+  button:disabled { opacity: .4; cursor: default; }
+  #toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel-2); border: 1px solid #ffffff30; border-radius: 8px; padding: 10px 14px; max-width: 420px; display: none; font-size: 13px; }
+  #offline { text-align: center; padding: 40px; color: var(--ink-3); display: none; }
+</style>
+</head>
+<body>
+<header>
+  <span id="statusdot" class="dot" style="background:var(--ink-3)"></span>
+  <h1>BotterDancer&nbsp;HUD</h1>
+  <span class="muted" style="font-size:12px">RTX PRO 6000 · Wan2.2-Animate · GVHMR</span>
+  <span id="clock"></span>
+</header>
+
+<div id="alerts"></div>
+<div id="offline">⚠ Dashboard-Server nicht erreichbar — <code>tools\start_dashboard.ps1</code></div>
+
+<div class="grid">
+  <section class="panel" id="gpu-panel">
+    <h2>GPU</h2>
+    <div class="meter">
+      <div class="lbl"><span>VRAM</span><b id="vram-txt">–</b></div>
+      <div class="bar"><i id="vram-bar" style="width:0%"></i></div>
+    </div>
+    <div class="meter">
+      <div class="lbl"><span>Auslastung</span><b id="util-txt">–</b></div>
+      <div class="bar"><i id="util-bar" style="width:0%"></i></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi">Temperatur<b id="temp">–</b></div>
+      <div class="kpi">Leistung<b id="power">–</b></div>
+      <div class="kpi">GPU-Prozesse<b id="nproc">–</b></div>
+    </div>
+    <canvas id="spark" class="spark" width="600" height="66"></canvas>
+    <ul id="procs"></ul>
+  </section>
+
+  <section class="panel">
+    <h2>Render &amp; Queue</h2>
+    <div class="row" style="border:0;padding-bottom:8px">
+      <span id="comfy-dot" class="dot" style="background:var(--ink-3)"></span>
+      <span id="comfy-state">ComfyUI …</span>
+      <span class="sub" id="queue-txt"></span>
+    </div>
+    <div id="prog" style="display:none">
+      <div class="meter">
+        <div class="lbl"><span id="prog-step">Step –/–</span><b id="prog-eta"></b></div>
+        <div class="bar"><i id="prog-bar" style="width:0%"></i></div>
+      </div>
+      <div class="kpis" style="margin-bottom:8px">
+        <div class="kpi">Tempo<b id="prog-sit">–</b></div>
+        <div class="kpi">Baseline<b id="prog-base">–</b></div>
+        <div class="kpi">Job läuft seit<b id="prog-elapsed">–</b></div>
+      </div>
+    </div>
+    <h2 style="margin-top:10px">Letzte Jobs</h2>
+    <ul id="jobs"></ul>
+  </section>
+
+  <section class="panel">
+    <h2>System-Checks</h2>
+    <ul id="checks"></ul>
+  </section>
+
+  <section class="panel">
+    <h2>Neueste Outputs</h2>
+    <ul id="outlist"></ul>
+    <div id="preview"><video controls muted loop></video><img alt="" style="display:none"><div class="cap"></div></div>
+  </section>
+</div>
+
+<div id="actions">
+  <button data-act="start_comfy">▶ ComfyUI starten</button>
+  <button data-act="free">♻ VRAM freigeben (/free)</button>
+  <button data-act="interrupt" data-confirm="Laufenden Job wirklich abbrechen?">■ Job abbrechen</button>
+  <button data-act="ollama_stop" data-confirm="Alle geladenen Ollama-Modelle entladen?">✂ Ollama entladen</button>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const fmtDur = s => s == null ? "–" : (s >= 60 ? Math.floor(s/60) + "m " + (s%60) + "s" : s + "s");
+// Auch Quotes/Backticks escapen: Dateinamen sind NTFS-legal mit ' " ` und landen
+// in Attributen — ohne das ist der Klick-Handler per Dateiname JS-injizierbar.
+const esc = t => (t || "").replace(/[<>&"'`]/g, c =>
+  ({"<":"&lt;",">":"&gt;","&":"&amp;","\"":"&quot;","'":"&#39;","`":"&#96;"}[c]));
+const fmtN = (v, suf, d) => v == null ? "n/a" : v.toFixed(d || 0) + suf;  // WDDM: Felder koennen null sein
+const hist = { util: [], vram: [] };
+const LEVEL_ICON = { critical: "⛔", serious: "🟠", warning: "⚠️", info: "ℹ️" };
+
+async function tick() {
+  let st;
+  try {
+    st = await (await fetch("/api/status", {cache: "no-store"})).json();
+    $("offline").style.display = "none";
+  } catch (e) {
+    $("offline").style.display = "block";
+    $("statusdot").style.background = "var(--crit)";
+    return;
+  }
+  $("clock").textContent = new Date().toLocaleTimeString("de-DE");
+
+  // --- Alerts
+  const al = st.alerts || [];
+  $("alerts").innerHTML = al.map((a, i) =>
+    `<div class="alert ${a.level}"><span>${LEVEL_ICON[a.level] || "⚠️"}</span><span>${esc(a.text)}</span>` +
+    (a.action ? `<button data-action="${esc(a.action)}">Beheben</button>` : "") + `</div>`).join("");
+  // info-Alerts sind reine Hinweise — sie duerfen den Status-Punkt nicht faerben
+  const worst = al.some(a => a.level === "critical") ? "var(--crit)" :
+                al.some(a => a.level === "serious") ? "var(--serious)" :
+                al.some(a => a.level === "warning") ? "var(--warn)" : "var(--good)";
+  $("statusdot").style.background = worst;
+
+  // --- Collector-Ausfall sichtbar machen (sonst wirkt eingefrorener Zustand live)
+  const stale = st.ts > 0 && (Date.now() / 1000 - st.ts) > 15;
+  if (st.collector_error || stale) {
+    const msg = st.collector_error
+      ? "Collector-Fehler: " + esc(st.collector_error)
+      : "Daten sind " + Math.round(Date.now() / 1000 - st.ts) + "s alt — Collector haengt?";
+    $("alerts").insertAdjacentHTML("afterbegin",
+      `<div class="alert critical"><span>⛔</span><span>${msg}</span></div>`);
+    $("statusdot").style.background = "var(--crit)";
+  }
+
+  // --- GPU
+  const g = st.gpu;
+  if (g && !g.error) {
+    const usedGiB = g.mem_used_mib / 1024, totGiB = g.mem_total_mib / 1024;
+    const pct = 100 * g.mem_used_mib / g.mem_total_mib;
+    $("vram-txt").textContent = usedGiB.toFixed(1) + " / " + totGiB.toFixed(0) + " GiB (" + pct.toFixed(0) + " %)";
+    $("vram-bar").style.width = pct + "%";
+    $("vram-bar").className = pct > 87 ? "hot" : "";
+    $("util-txt").textContent = fmtN(g.util, " %");
+    $("util-bar").style.width = (g.util || 0) + "%";
+    $("temp").textContent = fmtN(g.temp, " °C");
+    $("power").textContent = (g.power_w == null || g.power_limit_w == null) ? "n/a"
+      : g.power_w.toFixed(0) + " / " + g.power_limit_w.toFixed(0) + " W";
+    $("nproc").textContent = g.procs.length;
+    if (g.util != null) {
+      hist.util.push(g.util); hist.vram.push(pct);
+      if (hist.util.length > 120) { hist.util.shift(); hist.vram.shift(); }
+      spark();
+    }
+    const guiRow = g.gui_ctx > 0
+      ? `<li class="row muted"><span class="tag">gui</span><span>${g.gui_ctx} GUI-Kontexte</span>` +
+        `<span class="sub">WDDM, keine Messung moeglich</span></li>` : "";
+    $("procs").innerHTML = (g.procs.map(p =>
+      `<li class="row"><span class="tag ${p.kind}">${p.kind}</span><span>${esc(p.name)}</span>` +
+      `<span class="sub">${p.mem_mib == null ? "n/a (WDDM)" : (p.mem_mib/1024).toFixed(1) + " GB"}</span></li>`).join("") + guiRow) ||
+      `<li class="row muted">keine GPU-Prozesse</li>`;
+  }
+
+  // --- ComfyUI
+  const c = st.comfy || {};
+  $("comfy-dot").style.background = c.online ? "var(--good)" : "var(--ink-3)";
+  $("comfy-state").textContent = !c.online ? "ComfyUI offline"
+    : (c.queue_running > 0 && !st.progress ? "ComfyUI online — Job lädt (noch keine Steps)…" : "ComfyUI online");
+  $("queue-txt").textContent = c.online ? (c.queue_running + " aktiv · " + c.queue_pending + " wartend") : "";
+  const p = st.progress;
+  const showProg = c.online && c.queue_running > 0 && p;
+  $("prog").style.display = showProg ? "" : "none";
+  if (showProg) {
+    $("prog-step").textContent = "Step " + p.step + "/" + p.total;
+    $("prog-bar").style.width = (100 * p.step / Math.max(p.total, 1)) + "%";
+    $("prog-eta").textContent = p.eta_s != null ? "≈ " + fmtDur(p.eta_s) + " übrig" : "";
+    $("prog-sit").textContent = p.s_it + " s/it";
+    $("prog-sit").className = p.s_it > 1.6 * st.baseline_s_it ? "bad" : "";
+    $("prog-base").textContent = st.baseline_s_it + " s/it";
+    $("prog-elapsed").textContent = fmtDur(c.running_elapsed_s);
+  }
+  $("jobs").innerHTML = (c.history || []).map(h => {
+    const icon = h.ok ? `<span class="ok">✔</span>` : (h.error ? `<span class="bad">✘</span>` : `<span class="warn">…</span>`);
+    const name = h.files && h.files.length ? h.files[0] : ("Job " + h.id);
+    return `<li class="row">${icon}<span title="${esc(h.error || "")}">${esc(name)}</span>` +
+           `<span class="sub">${fmtDur(h.duration_s)}</span></li>`;
+  }).join("") || `<li class="row muted">${c.online ? "noch keine Jobs" : "—"}</li>`;
+
+  // --- Checks
+  $("checks").innerHTML = (st.checks || []).map(ch => {
+    const icon = ch.ok ? `<span class="ok">✔</span>` :
+      (ch.level === "critical" ? `<span class="bad">✘</span>` : `<span class="warn">△</span>`);
+    return `<li class="row">${icon}<span>${esc(ch.label)}</span><span class="sub">${esc(ch.detail)}</span></li>`;
+  }).join("");
+
+  // --- Outputs (data-name + delegierter Listener statt Inline-onclick:
+  //     Dateinamen mit ' " ` sind NTFS-legal und waren JS-injizierbar)
+  $("outlist").innerHTML = (st.outputs || []).map(o =>
+    `<li class="row" data-name="${esc(o.name)}"><span>${esc(o.name)}</span>` +
+    `<span class="sub">${o.size_mb} MB · ${new Date(o.mtime*1000).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></li>`).join("") ||
+    `<li class="row muted">keine Dateien</li>`;
+}
+
+function spark() {
+  const cv = $("spark"), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const draw = (arr, color, dash) => {
+    if (arr.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.setLineDash(dash || []);
+    arr.forEach((v, i) => {
+      const x = i / 119 * cv.width, y = cv.height - 3 - (v / 100) * (cv.height - 6);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  draw(hist.util, "#3987e5");          // Auslastung — durchgezogen
+  draw(hist.vram, "#c3c2b7", [4, 3]);  // VRAM % — gestrichelt (Form, nicht nur Farbe)
+  ctx.fillStyle = "#8a897f"; ctx.font = "10px Segoe UI";
+  ctx.fillText("— Util   ‑ ‑ VRAM  (5 min)", 6, 11);
+}
+
+function preview(name) {
+  const pv = $("preview"), vid = pv.querySelector("video"), img = pv.querySelector("img");
+  pv.style.display = "block";
+  pv.querySelector(".cap").textContent = name;
+  if (/\.(mp4|webm)$/i.test(name)) {
+    img.style.display = "none"; vid.style.display = "";
+    vid.src = "/file/" + encodeURIComponent(name); vid.play().catch(() => {});
+  } else if (/\.(png|jpg)$/i.test(name)) {
+    vid.pause(); vid.style.display = "none"; img.style.display = "";
+    img.src = "/file/" + encodeURIComponent(name);
+  }
+}
+
+async function act(name) {
+  const btn = document.querySelector(`[data-act="${name}"]`);
+  const confirmMsg = btn && btn.dataset.confirm;
+  if (confirmMsg && !window.confirm(confirmMsg)) return;
+  toast("…");
+  try {
+    const r = await (await fetch("/api/action/" + name, {method: "POST"})).json();
+    toast((r.ok ? "✔ " : "✘ ") + r.detail);
+  } catch (e) { toast("✘ " + e); }
+}
+let toastT;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(toastT); toastT = setTimeout(() => t.style.display = "none", 6000);
+}
+document.querySelectorAll("#actions button").forEach(b => b.onclick = () => act(b.dataset.act));
+$("outlist").addEventListener("click", e => {
+  const li = e.target.closest("li[data-name]");
+  if (li) preview(li.dataset.name);
+});
+$("alerts").addEventListener("click", e => {
+  const b = e.target.closest("button[data-action]");
+  if (b) act(b.dataset.action);
+});
+tick(); setInterval(tick, 2500);
+</script>
+</body>
+</html>

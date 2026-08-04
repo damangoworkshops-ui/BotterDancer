@@ -1,0 +1,10 @@
+{
+    "workflow": "wan_animate_final_v2.json",
+    "description": "Kamera 120 Grad auf dem v3-Pose-Set (16fps-Resample + Spiegelungs-Fix 2026-07-19); ACHTUNG: nutzt noch Frontal-Referenz/-Prompt fuer Seitenansicht (offenes Experiment, Audit C) [final]",
+    "set": [
+        "20.directory=C:\\ComfyUI\\input\\botter_pose_cam120_v3",
+        "33.filename_prefix=botter_cam120"
+    ],
+    "angle": 120,
+    "profile": "final"
+}

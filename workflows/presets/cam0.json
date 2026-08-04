@@ -1,0 +1,10 @@
+{
+    "workflow": "wan_animate_final_v2.json",
+    "description": "Kamera 0 Grad auf dem v3-Pose-Set (16fps-Resample + Spiegelungs-Fix 2026-07-19) [final]",
+    "set": [
+        "20.directory=C:\\ComfyUI\\input\\botter_pose_cam0_v3",
+        "33.filename_prefix=botter_cam0"
+    ],
+    "angle": 0,
+    "profile": "final"
+}

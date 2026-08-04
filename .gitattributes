@@ -1,0 +1,3 @@
+# Keine Zeilenende-Normalisierung: PS-5.1-Skripte sind BOM-/Encoding-sensitiv
+# (siehe PS-5.1-Encoding-Falle in der Projekt-Doku) -- Dateien bleiben byte-exakt.
+* -text

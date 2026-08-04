@@ -1,0 +1,8 @@
+{
+  "_comment": "Post-Stage: Final 16fps -> RIFE 2x -> 32fps. Originale bleiben erhalten (jeder 2. Frame), Echtzeit/Musik-Sync unveraendert. Konfiguriert ist rife417 (validiert); rife426 ist in diesem Install DEFEKT (state_dict-Mismatch, Log-belegt) — nicht wechseln. ACHTUNG Stale-Falle (Audit A4): den zu interpolierenden Final IMMER explizit setzen: erst von output nach input kopieren, dann tools\\submit_workflow.py workflows\\rife_32fps.json --set 1.video=botter_final_0000N.mp4",
+  "prompt": {
+    "1": {"class_type":"VHS_LoadVideo","inputs":{"video":"botter_final_00001.mp4","force_rate":0,"custom_width":0,"custom_height":0,"frame_load_cap":0,"skip_first_frames":0,"select_every_nth":1}},
+    "2": {"class_type":"RIFE VFI","inputs":{"ckpt_name":"rife417.pth","frames":["1",0],"clear_cache_after_n_frames":10,"multiplier":2,"fast_mode":true,"ensemble":true,"scale_factor":1.0,"dtype":"float32","torch_compile":false,"batch_size":1}},
+    "3": {"class_type":"VHS_VideoCombine","inputs":{"images":["2",0],"frame_rate":32,"loop_count":0,"filename_prefix":"botter_final_32fps","format":"video/h264-mp4","pingpong":false,"save_output":true,"save_metadata":false}}
+  }
+}
