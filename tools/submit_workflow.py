@@ -139,21 +139,30 @@ def count_usable_images(directory, skip_first, every_nth):
     return n
 
 
-def ffprobe_fps(path):
-    """avg_frame_rate als float oder None (ffprobe fehlt/Datei unlesbar)."""
+def ffprobe_video(path):
+    """{'fps': float, 'frames': int|None} oder None (ffprobe fehlt/Datei unlesbar)."""
     import shutil as _sh
     exe = _sh.which("ffprobe") or (FFPROBE_FALLBACK if os.path.isfile(FFPROBE_FALLBACK) else None)
     if not exe:
         return None
     try:
         r = subprocess.run([exe, "-v", "error", "-select_streams", "v:0", "-show_entries",
-                            "stream=avg_frame_rate", "-of", "csv=p=0", path],
+                            "stream=avg_frame_rate,nb_frames", "-of", "json", path],
                            capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             return None
-        return float(Fraction(r.stdout.strip()))
-    except (ValueError, ZeroDivisionError, OSError, subprocess.TimeoutExpired):
+        s = json.loads(r.stdout)["streams"][0]
+        frames = s.get("nb_frames")
+        return {"fps": float(Fraction(s["avg_frame_rate"])),
+                "frames": int(frames) if frames and str(frames).isdigit() else None}
+    except (ValueError, ZeroDivisionError, OSError, KeyError, IndexError,
+            subprocess.TimeoutExpired):
         return None
+
+
+def ffprobe_fps(path):
+    info = ffprobe_video(path)
+    return info["fps"] if info else None
 
 
 def check_rife_fps(prompt, issues):
@@ -406,6 +415,57 @@ def check_pose_postcondition(prompt, files, t_submit):
     return problems
 
 
+def expected_video_contract(prompt):
+    """Erwartungen an Video-Outputs aus dem Graph ableiten (Artefaktvertrag,
+    Audit 04.08. Folge-Item): fps aus VHS_VideoCombine.frame_rate; Framezahl aus
+    WanAnimateToVideo.length bzw. RIFE: Input-Frames x multiplier."""
+    fps = frames = None
+    mult = video_in = None
+    for n in prompt.values():
+        ct = n.get("class_type", "")
+        ins = n.get("inputs", {})
+        if ct == "VHS_VideoCombine":
+            fps = _lit(ins.get("frame_rate"))
+        elif ct == "WanAnimateToVideo":
+            frames = _lit(ins.get("length"))
+        elif "RIFE" in ct:
+            mult = _lit(ins.get("multiplier"))
+        elif ct == "VHS_LoadVideo" and isinstance(ins.get("video"), str):
+            video_in = resolve_annotated(ins["video"])
+    if frames is None and mult and video_in and os.path.isfile(video_in):
+        info = ffprobe_video(video_in)
+        if info and info["frames"]:
+            frames = int(info["frames"] * mult)
+    return fps, frames
+
+
+def check_video_postconditions(prompt, files):
+    """Fertige Video-Outputs gegen den Graph-Vertrag pruefen. Rueckgabe: Problemliste."""
+    exp_fps, exp_frames = expected_video_contract(prompt)
+    problems = []
+    for f in files:
+        path = f.split("  (")[0]  # evtl. annotierte Eintraege (Pose-Postcondition)
+        if not path.lower().endswith((".mp4", ".webm", ".mov")):
+            continue
+        if not os.path.isfile(path):
+            problems.append(f"Output fehlt auf Platte: {path}")
+            continue
+        info = ffprobe_video(path)
+        if info is None:
+            problems.append(f"Output nicht analysierbar (ffprobe): {path}")
+            continue
+        if not info["frames"]:
+            problems.append(f"{os.path.basename(path)}: 0/unbekannte Frames.")
+            continue
+        if exp_fps is not None and abs(info["fps"] - exp_fps) > 0.05:
+            problems.append(f"{os.path.basename(path)}: {info['fps']:g} fps, Graph "
+                            f"verlangt {exp_fps:g}.")
+        if exp_frames is not None and info["frames"] != exp_frames:
+            problems.append(f"{os.path.basename(path)}: {info['frames']} Frames, "
+                            f"Graph erwartet {exp_frames}.")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("workflow", nargs="?", help="Pfad zum Workflow-JSON (API-Format)")
@@ -528,6 +588,7 @@ def main():
             if ok:
                 files = collect_outputs(entry)
                 problems = check_pose_postcondition(prompt, files, t_submit)
+                problems += check_video_postconditions(prompt, files)
                 if problems:
                     for p in problems:
                         print("PROBLEM: " + p, file=sys.stderr)

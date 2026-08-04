@@ -56,6 +56,54 @@ def comfy_url():
 # 512x768x81/20 Steps. Die frueheren "8-10" galten fuer den kleineren
 # 480p-Workload und erzeugten hier False-Positive-Fremdlast-Alarme (Audit F8).
 BASELINE_S_IT = 15.7
+# Draft-Lane (lightx2v, 4 Steps): gemessen 4-8 s/it (19.07.-04.08.) — eigene
+# Basis, sonst wuerde reale Contention im Draft-Betrieb NIE alarmiert
+# (Audit F8, Verifier-Note: Ein-Wert-Baseline ist im Draft-Betrieb blind).
+DRAFT_BASELINE_S_IT = 8.0
+_REF_WORKLOAD_PIX = 512 * 768 * 81  # Bezugsgroesse der gemessenen Baselines
+
+
+def workload_from_prompt(graph):
+    """Workload-Signatur aus einem laufenden Prompt-Graphen (queue_running[0][2])."""
+    if not isinstance(graph, dict):
+        return None
+    w = h = length = steps = None
+    draft = False
+    for n in graph.values():
+        if not isinstance(n, dict):
+            continue
+        ins = n.get("inputs", {})
+        ct = n.get("class_type")
+        if ct == "WanAnimateToVideo":
+            for key, var in (("width", "w"), ("height", "h"), ("length", "l")):
+                v = ins.get(key)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    if var == "w":
+                        w = v
+                    elif var == "h":
+                        h = v
+                    else:
+                        length = v
+        elif ct == "KSampler":
+            v = ins.get("steps")
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                steps = v
+        elif ct == "LoraLoaderModelOnly" and "lightx2v" in str(ins.get("lora_name", "")).lower():
+            draft = True
+    if not (w and h and length):
+        return None
+    return {"width": int(w), "height": int(h), "length": int(length),
+            "steps": steps, "draft": draft}
+
+
+def baseline_for(workload):
+    """s/it-Baseline fuer den konkreten Workload; skaliert linear mit
+    Pixel x Frames relativ zur gemessenen 512x768x81-Basis."""
+    if not workload:
+        return BASELINE_S_IT
+    base = DRAFT_BASELINE_S_IT if workload.get("draft") else BASELINE_S_IT
+    scale = (workload["width"] * workload["height"] * workload["length"]) / float(_REF_WORKLOAD_PIX)
+    return max(base * scale, 1.0)
 VRAM_CEILING_MIB = 87000  # ~85 GiB Admission-Ceiling aus dem Architektur-Review
 FOREIGN_PROC_MIB = 1500   # ab hier gilt ein Fremdprozess als GPU-relevant
 
@@ -160,7 +208,8 @@ def http_json(url, payload=None, timeout=3):
 
 def comfy_status():
     st = {"online": False, "queue_running": 0, "queue_pending": 0,
-          "running_id": None, "running_elapsed_s": None, "history": [], "url": None}
+          "running_id": None, "running_elapsed_s": None, "history": [],
+          "url": None, "workload": None}
     url = comfy_url()
     if not url:
         return st
@@ -183,6 +232,8 @@ def comfy_status():
         st["running_id"] = pid
         FIRST_SEEN.setdefault(pid, time.time())
         st["running_elapsed_s"] = round(time.time() - FIRST_SEEN[pid])
+        if len(running[0]) > 2:
+            st["workload"] = workload_from_prompt(running[0][2])
     try:
         hist = http_json(url + "/history?max_items=8")
     except (urllib.error.URLError, socket.timeout, ConnectionError, OSError):
@@ -395,9 +446,13 @@ def build_alerts(gpu, comfy, progress, checks):
                            "action": "free"})
 
     if progress and comfy and comfy["queue_running"] > 0:
-        if progress["s_it"] > 1.6 * BASELINE_S_IT:
-            txt = ("Render laeuft mit %.1f s/it — %.1fx langsamer als Baseline (%.0f)."
-                   % (progress["s_it"], progress["s_it"] / BASELINE_S_IT, BASELINE_S_IT))
+        base = baseline_for(comfy.get("workload"))
+        if progress["s_it"] > 1.6 * base:
+            wl = comfy.get("workload")
+            wl_txt = ("%dx%dx%d%s" % (wl["width"], wl["height"], wl["length"],
+                                      " draft" if wl.get("draft") else "")) if wl else "Standard"
+            txt = ("Render laeuft mit %.1f s/it — %.1fx langsamer als Baseline (%.1f, %s)."
+                   % (progress["s_it"], progress["s_it"] / base, base, wl_txt))
             # Gemessene Verlangsamung + LLM praesent = wahrscheinlicher Verursacher
             # (das ist der belastbare WDDM-Detektor, nicht die blosse Praesenz).
             if llm_names:
@@ -438,7 +493,7 @@ def refresher():
                 STATE.update({"ts": int(time.time()), "gpu": gpu, "comfy": comfy,
                               "progress": progress, "checks": checks,
                               "outputs": outputs, "alerts": alerts,
-                              "baseline_s_it": BASELINE_S_IT})
+                              "baseline_s_it": baseline_for(comfy.get("workload"))})
                 STATE.pop("collector_error", None)  # transienter Fehler ist vorbei
                 STATE.pop("error_ts", None)
         except Exception as e:  # HUD darf nie sterben

@@ -387,6 +387,10 @@ def main():
 
     signer, leaf_serial = load_credentials()
     w, h, fps, nframes = enforce_contract(probe(ffprobe, src), src)
+    if not args.no_watermark and (w < 256 or h < 256):
+        # imwatermark/dwtDct verweigert unter 256x256 (RuntimeError tief im Encode)
+        fail(2, f"Eingabevertrag: {w}x{h} zu klein fuers Watermark (min. 256x256) — "
+                f"--no-watermark nutzen oder groesser rendern.")
     integrity_check(ffmpeg, src)
     print(f"Export: {src.name} ({w}x{h}@{fps}, {nframes} Frames) -> {dst}")
 
