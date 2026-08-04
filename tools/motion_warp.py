@@ -67,7 +67,9 @@ def foot_skate(j17, fps, contact_h=0.05):
     for a in (L_ANKLE, R_ANKLE):
         h = j17[:, a, 1] - floor
         vxz = np.linalg.norm(np.diff(j17[:, a, :][:, [0, 2]], axis=0), axis=-1) * fps
-        contact = h[:-1] < contact_h
+        # beide Intervall-Endpunkte im Kontakt (Off-by-one-Fix 05.08.: sonst
+        # zaehlte Toe-off als Kontakt-Skate und Heel-Strike-Slides nie)
+        contact = (h[:-1] < contact_h) & (h[1:] < contact_h)
         if contact.any():
             vals.append(float(vxz[contact].mean()))
     return float(np.mean(vals)) if vals else float("nan")
