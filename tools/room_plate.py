@@ -42,6 +42,10 @@ def main():
     ap.add_argument("--video", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--frames", type=int, default=81, help="Laenge des Plates")
+    ap.add_argument("--fps", type=float, help="fps des Plates (Default: wie die Quelle). "
+                    "WICHTIG: muss zur fps der Figuren-Clips passen, sonst laeuft das "
+                    "Composite zeitlich falsch (Befund 06.08.: 30er-Plate + 16er-Figuren "
+                    "ergab einen um 1.9x zu schnellen Clip).")
     ap.add_argument("--sample", type=int, default=0,
                     help="wie viele Quellframes in den Median (0 = alle)")
     ap.add_argument("--crf", type=int, default=12)
@@ -73,6 +77,8 @@ def main():
         arr = arr[idx]
     plate = np.median(arr, axis=0).astype(np.uint8)
     h, w = plate.shape[:2]
+    if args.fps:
+        fps = args.fps
 
     # Restspuren pruefen: wo weicht der Median stark von der Mehrheit ab?
     dev = np.median(np.abs(arr.astype(np.float32) - plate), axis=0).mean()

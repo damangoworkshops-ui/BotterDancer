@@ -148,7 +148,16 @@ def main():
               file=sys.stderr)
         return 2
     for oi, ov_path in enumerate(args.overlay):
-        ov, _ = read_frames(ov_path)
+        ov, ov_fps = read_frames(ov_path)
+        # fps-Konsistenz ist Pflicht: das Ergebnis erbt die fps der BASIS, ein
+        # abweichender Overlay laeuft dann zeitlich falsch (Befund 06.08.:
+        # 30er-Raum-Plate + 16er-Figuren = 1.9x zu schneller Clip; erst das
+        # RIFE-Preflight-Gate hat es bemerkt).
+        if abs(ov_fps - fps) > 0.05:
+            print(f"FEHLER: {os.path.basename(ov_path)} hat {ov_fps:g} fps, Basis "
+                  f"{fps:g} fps — Ergebnis waere zeitlich falsch. Quellen angleichen.",
+                  file=sys.stderr)
+            return 2
         if ov.shape[1:3] != (h, w):
             print(f"FEHLER: {ov_path} hat {ov.shape[2]}x{ov.shape[1]}, "
                   f"Basis {w}x{h}.", file=sys.stderr)

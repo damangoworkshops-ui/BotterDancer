@@ -22,7 +22,7 @@ except ImportError:
     FFMPEG = None
 
 
-def synth_clip(path, x_start, color, n=30, w=320, h=180):
+def synth_clip(path, x_start, color, n=30, w=320, h=180, fps=16):
     """Statischer heller Hintergrund + wandernder farbiger Block."""
     import cv2
     d = path + "_f"
@@ -33,7 +33,7 @@ def synth_clip(path, x_start, color, n=30, w=320, h=180):
         x = x_start + i
         cv2.rectangle(img, (x, 60), (x + 30, 140), color, -1)
         cv2.imwrite(os.path.join(d, "f%04d.png" % i), img)
-    subprocess.run([FFMPEG, "-v", "error", "-framerate", "16", "-i",
+    subprocess.run([FFMPEG, "-v", "error", "-framerate", str(fps), "-i",
                     os.path.join(d, "f%04d.png"), "-c:v", "libx264", "-crf", "8",
                     "-pix_fmt", "yuv420p", "-y", path], check=True, capture_output=True)
     shutil.rmtree(d, ignore_errors=True)
@@ -87,6 +87,19 @@ class TestComposite(unittest.TestCase):
         green = frame[100, 200 + 10 + 15]
         self.assertGreater(int(red[2]), 120, f"rote Figur fehlt: {red}")
         self.assertGreater(int(green[1]), 120, f"gruene Figur fehlt: {green}")
+
+    def test_fps_konflikt_wird_abgelehnt(self):
+        """Regression 06.08.: 30er-Raum-Plate + 16er-Figuren ergab einen 1.9x zu
+        schnellen Clip — das faellt sonst erst im RIFE-Preflight auf."""
+        a = os.path.join(self.d, "base30.mp4")
+        b = os.path.join(self.d, "ov16.mp4")
+        synth_clip(a, 20, (40, 40, 200), fps=30)
+        synth_clip(b, 200, (40, 200, 40), fps=16)
+        r = subprocess.run([sys.executable, TOOL, "--base", a, "--overlay", b,
+                            "--out", os.path.join(self.d, "o.mp4")],
+                           capture_output=True, text=True, timeout=180)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("fps", r.stderr)
 
     def test_groessenkonflikt_wird_abgelehnt(self):
         a = os.path.join(self.d, "a.mp4")
