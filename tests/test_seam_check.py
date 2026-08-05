@@ -95,6 +95,42 @@ class TestSeamCheck(unittest.TestCase):
                            capture_output=True, text=True, timeout=120)
         self.assertIn("ausserhalb", r.stderr)
 
+    def test_pose_kontrolle_entlastet_bei_input_sprung(self):
+        """Kernvertrag der Kontrollmessung (06.08. am echten Chain-Render
+        entwickelt): springt schon der POSE-INPUT an der Naht, ist der Render
+        unschuldig — dann darf das Gate NICHT anschlagen."""
+        import cv2
+        v = os.path.join(self.d, "inputjump.mp4")
+        synth_clip(v, n=60, seam=30, jump_px=40)      # Video springt...
+        pose = os.path.join(self.d, "posedir")
+        os.makedirs(pose, exist_ok=True)
+        for i in range(60):                            # ...und der Input auch
+            img = np.zeros((192, 128, 3), np.uint8)
+            x = 20 + abs((i % 80) - 40) + (40 if i >= 30 else 0)
+            cv2.rectangle(img, (x, 60), (x + 30, 150), (255, 255, 255), -1)
+            cv2.imwrite(os.path.join(pose, "p%04d.png" % i), img)
+        r = subprocess.run([sys.executable, TOOL, "--video", v, "--seams", "30",
+                            "--pose-dir", pose], capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Render-Ueberschuss", r.stdout)
+
+    def test_pose_kontrolle_meldet_reines_render_artefakt(self):
+        """Umkehrung: Input glatt, Video springt -> Artefakt muss gemeldet werden."""
+        import cv2
+        v = os.path.join(self.d, "renderjump.mp4")
+        synth_clip(v, n=60, seam=30, jump_px=40)
+        pose = os.path.join(self.d, "posedir2")
+        os.makedirs(pose, exist_ok=True)
+        for i in range(60):                            # Input OHNE Sprung
+            img = np.zeros((192, 128, 3), np.uint8)
+            x = 20 + abs((i % 80) - 40)
+            cv2.rectangle(img, (x, 60), (x + 30, 150), (255, 255, 255), -1)
+            cv2.imwrite(os.path.join(pose, "p%04d.png" % i), img)
+        r = subprocess.run([sys.executable, TOOL, "--video", v, "--seams", "30",
+                            "--pose-dir", pose], capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 4, r.stdout)
+        self.assertIn("RENDER-NAHT-ARTEFAKT", r.stdout)
+
     def test_chunk_parameter_leiten_naehte_ab(self):
         v = os.path.join(self.d, "chunks.mp4")
         synth_clip(v, n=90, seam=None)
