@@ -110,5 +110,53 @@ class TestUncrop(unittest.TestCase):
         self.assertGreater(top(small[0]), top(full[0]) + 100)
 
 
+@unittest.skipUnless(HAVE_CV2, "opencv nicht verfuegbar")
+class TestScaleCorrection(unittest.TestCase):
+    """Der Massstab wird auf die Groesse normiert, die ein VOLLBILD-Render
+    erzeugt haette (Pose x WAN_SCALE_BIAS) — nicht auf die nackte Pose. Sonst
+    steht die Crop-Figur zu klein neben ihren Nachbarinnen (0.58 statt 0.79)."""
+
+    def setUp(self):
+        from crew_composite import WAN_SCALE_BIAS
+        self.bias = WAN_SCALE_BIAS
+        self.d = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def _pose_dir(self, height_px, n=6, w=1024, h=576):
+        d = tempfile.mkdtemp(dir=self.d)
+        for i in range(n):
+            img = np.zeros((h, w, 3), np.uint8)
+            y0 = (h - height_px) // 2
+            cv2.line(img, (500, y0), (500, y0 + height_px), (0, 255, 0), 5)
+            cv2.imwrite(os.path.join(d, "p%04d.png" % i), img)
+        return d
+
+    def test_bias_wird_beruecksichtigt(self):
+        from crew_composite import scale_correction
+        # Crop-Render: Figur fuellt 90% von 768; Fenster 500px hoch
+        frames = np.zeros((6, 768, 512, 3), np.uint8)
+        frames[:, 38:730, 100:400] = 200
+        crop_dir = self._pose_dir(500, w=512, h=768)   # Pose im Crop (ungenutzt hier)
+        meta = {"windows": [[0.0, 0.0, 333.0, 500.0]] * 6, "out": [512, 768],
+                "canvas": [1024, 576], "source_pose_dir": crop_dir}
+        full = self._pose_dir(280)                      # Skelett im Vollbild: 280px
+        sc = scale_correction(frames, meta, full)
+        # ist = 692 * 500/768 = 450 ; soll = 280 * bias
+        erwartet = (280 * self.bias) / (692 * 500 / 768)
+        self.assertAlmostEqual(sc, erwartet, delta=0.05)
+        self.assertGreater(sc, 280 / 450, "ohne Bias waere die Figur zu klein")
+
+    def test_ohne_vollbildposen_faellt_zurueck(self):
+        from crew_composite import scale_correction
+        frames = np.zeros((4, 768, 512, 3), np.uint8)
+        frames[:, 100:700, 100:400] = 200
+        meta = {"windows": [[0.0, 0.0, 333.0, 500.0]] * 4, "out": [512, 768],
+                "canvas": [1024, 576], "source_pose_dir": self._pose_dir(500, w=512, h=768)}
+        sc = scale_correction(frames, meta, None)
+        self.assertTrue(0.4 <= sc <= 1.2)
+
+
 if __name__ == "__main__":
     unittest.main()

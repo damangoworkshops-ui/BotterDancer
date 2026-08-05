@@ -118,7 +118,56 @@ def person_mask(frames, thresh, feather, min_area=200, boxes=None):
     return np.clip(masks, 0.0, 1.0)
 
 
-def scale_correction(frames, crop_meta, sample=7):
+WAN_SCALE_BIAS = 1.36
+"""Wan rendert die Figur groesser als die Pose vorgibt — auch im Vollbild.
+Gemessen 06.08. am IZNA-Material: Skelett 71%% der Bildhoehe, gerenderte Figur
+97%%. Das ist keine Stoerung, sondern Teil des Looks: ALLE Figuren erscheinen
+so. Eine Crop-Figur muss deshalb auf DIESE Groesse normiert werden, nicht auf
+die nackte Pose-Groesse — sonst steht sie zu klein neben ihren Nachbarinnen
+(erst gemessen 0.58 statt der passenden ~0.75).
+"""
+
+
+def scale_correction(frames, crop_meta, full_pose_dir=None, sample=7,
+                     bias=WAN_SCALE_BIAS):
+    """Wie stark muss der zurueckprojizierte Ausschnitt verkleinert werden?
+
+    Zielgroesse = Skeletthoehe im Vollbild * WAN_SCALE_BIAS (also so gross, wie
+    ein normaler Vollbild-Render dieselbe Figur gemacht haette). Istgroesse =
+    Figurhoehe im Crop, auf das Fenster zurueckgerechnet. Ohne Vollbild-Posen
+    faellt die Funktion auf eine Verhaeltnis-Schaetzung zurueck.
+    """
+    import cv2
+    import glob
+    if full_pose_dir and os.path.isdir(full_pose_dir):
+        full_files = sorted(glob.glob(os.path.join(full_pose_dir, "*.png")))
+        wins = crop_meta["windows"]
+        _, oh = crop_meta["out"]
+        ratios = []
+        n = min(len(frames), len(full_files), len(wins))
+        for i in np.linspace(0, n - 1, min(sample * 2, n)).astype(int):
+            f = frames[int(i)]
+            bg = np.median(np.concatenate([f[:8, :8].reshape(-1, 3),
+                                           f[:8, -8:].reshape(-1, 3)]), axis=0)
+            m = np.linalg.norm(f.astype(np.int16) - bg, axis=2) > 40
+            ys, _ = np.where(m)
+            fp = cv2.imread(full_files[int(i)])
+            if len(ys) < 50 or fp is None:
+                continue
+            pys, _ = np.where(fp.max(axis=2) > 20)
+            if len(pys) < 20:
+                continue
+            # Soll = so gross, wie ein Vollbild-Render diese Figur gemacht haette
+            soll = float(pys.max() - pys.min()) * bias
+            ist = float(ys.max() - ys.min()) * wins[int(i)][3] / oh
+            if ist > 5 and soll > 5:
+                ratios.append(soll / ist)
+        if ratios:
+            return float(np.clip(np.median(ratios), 0.4, 1.2))
+    return _scale_correction_ratio(frames, crop_meta, sample)
+
+
+def _scale_correction_ratio(frames, crop_meta, sample=7):
     """Wan rendert die Figur groesser als die Pose vorgibt — es orientiert sich
     an der (formatfuellenden) Referenz. Gemessen 06.08. am Crop: Skelett 71%
     der Bildhoehe, gerenderte Figur 97%. Ohne Korrektur landet die Figur beim
@@ -132,31 +181,38 @@ def scale_correction(frames, crop_meta, sample=7):
     import glob
     pose_files = sorted(glob.glob(os.path.join(crop_meta["source_pose_dir"], "*.png")))
     ow, oh = crop_meta["out"]
-    # Verhaeltnis der MAXIMA ueber die Stichprobe, nicht Median der
-    # Einzelverhaeltnisse: in gebueckten Frames ist das Skelett flach, waehrend
-    # das Modell die Figur formatfuellend haelt — Einzelverhaeltnisse ziehen den
-    # Wert dann nach unten (gemessen 0.53 statt der korrekten ~0.73).
-    fig_hs, pose_hs = [], []
-    idxs = np.linspace(0, min(len(frames), len(pose_files)) - 1, sample).astype(int)
+    # Paarweise je Frame messen und nur die gestrecktesten Posen werten: dort
+    # ist die Figur am ehesten formatfuellend und das Verhaeltnis stabil. In
+    # gebueckten Frames ist das Skelett flach, waehrend das Modell die Figur
+    # gross haelt — solche Frames verzerren den Wert nach unten (gemessen 0.53
+    # statt der korrekten ~0.73). Maxima aus VERSCHIEDENEN Frames zu teilen ist
+    # ebenfalls falsch, deshalb strikt paarweise.
+    pairs = []
+    n = min(len(frames), len(pose_files))
+    idxs = np.linspace(0, n - 1, min(sample * 2, n)).astype(int)
     for i in idxs:
         f = frames[int(i)]
         bg = np.median(np.concatenate([f[:8, :8].reshape(-1, 3),
                                        f[:8, -8:].reshape(-1, 3)]), axis=0)
         m = np.linalg.norm(f.astype(np.int16) - bg, axis=2) > 40
         ys, _ = np.where(m)
-        if len(ys) >= 50:
-            fig_hs.append(float(ys.max() - ys.min()))
         p = cv2.imread(pose_files[int(i)])
-        if p is None:
+        if len(ys) < 50 or p is None:
             continue
         if p.shape[0] != oh or p.shape[1] != ow:
             p = cv2.resize(p, (ow, oh), interpolation=cv2.INTER_NEAREST)
         pys, _ = np.where(p.max(axis=2) > 20)
-        if len(pys) >= 20:
-            pose_hs.append(float(pys.max() - pys.min()))
-    if not fig_hs or not pose_hs:
+        if len(pys) < 20:
+            continue
+        fig_h = float(ys.max() - ys.min())
+        pose_h = float(pys.max() - pys.min())
+        if fig_h > 10 and pose_h > 10:
+            pairs.append((pose_h, pose_h / fig_h))
+    if not pairs:
         return 1.0
-    return float(np.clip(max(pose_hs) / max(fig_hs), 0.5, 1.0))
+    pairs.sort(reverse=True)                      # gestreckteste Posen zuerst
+    top = [r for _, r in pairs[:max(3, len(pairs) // 3)]]
+    return float(np.clip(np.median(top), 0.5, 1.0))
 
 
 def uncrop(frames, crop_meta, canvas_w, canvas_h, scale=1.0):
@@ -237,7 +293,9 @@ def main():
                     print(f"FEHLER: {entry} gehoert zu Canvas {cm['canvas']}, "
                           f"Basis ist {[w, h]}.", file=sys.stderr)
                     return 2
-                sc = 1.0 if args.no_scale_fix else scale_correction(ov, cm)
+                full_pose = (args.overlay_pose[oi] if args.overlay_pose else None)
+                sc = (1.0 if args.no_scale_fix
+                      else scale_correction(ov, cm, full_pose))
                 # Maske VOR dem Uncrop bestimmen: im Crop findet der zeitliche
                 # Median den Studio-Hintergrund korrekt. Nach dem Uncrop ist
                 # ausserhalb des Fensters alles schwarz — der helle Crop-Kasten
