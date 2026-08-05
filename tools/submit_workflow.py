@@ -262,12 +262,18 @@ def preflight(prompt, force=False):
                 else:
                     mtime = time.strftime("%d.%m. %H:%M", time.localtime(os.path.getmtime(p)))
                     issues.append(("OK", f"Node {nid}: {v} ({os.path.getsize(p) / 1e6:.1f} MB, vom {mtime})"))
-        elif ct == "LoadImage":
+        elif ct in ("LoadImage", "LoadImageMask"):
             img = ins.get("image", "")
             if isinstance(img, str):
                 p = resolve_annotated(img)
                 if not os.path.isfile(p):
                     issues.append(("FEHLER", f"Node {nid}: Bild fehlt: {p}"))
+                else:
+                    # mtime anzeigen: eine Maske, die deutlich aelter ist als ihr
+                    # Bild, ist fast immer der Rest eines FRUEHEREN Jobs — das
+                    # Inpainting wuerde dann die falschen Flaechen fuellen.
+                    mtime = time.strftime("%d.%m. %H:%M", time.localtime(os.path.getmtime(p)))
+                    issues.append(("OK", f"Node {nid}: {img} (vom {mtime})"))
         elif ct == "VHS_VideoCombine":
             if ins.get("save_metadata") is not False:
                 issues.append(("WARNUNG", f"Node {nid}: save_metadata nicht false — "

@@ -91,7 +91,6 @@ def masked_plate(arr, mask_dir, min_samples=3, dump_mask=None):
     # strukturiertem Hintergrund bleibt es eine Naeherung.
     hopeless = (counts < min_samples).astype(np.uint8)
     if hopeless.any():
-        import cv2
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         grown = cv2.dilate(hopeless, k)
         if dump_mask:
@@ -103,7 +102,15 @@ def masked_plate(arr, mask_dir, min_samples=3, dump_mask=None):
         out = cv2.inpaint(out, grown, 6, cv2.INPAINT_TELEA)
         print(f"[plate] {int(hopeless.sum())} dauerhaft verdeckte Pixel "
               f"({hopeless.mean() * 100:.1f}%) per Telea-Inpainting gefuellt")
-    return out
+    elif dump_mask:
+        # IMMER schreiben, auch leer: sonst laege im Input noch die Maske des
+        # VORIGEN Jobs, und ein fest verdrahteter Inpaint-Workflow wuerde im
+        # neuen Plate die Flaechen des alten halluzinieren (Review 06.08.).
+        cv2.imwrite(dump_mask, np.zeros(counts.shape, np.uint8))
+        print(f"[plate] keine aussichtslosen Flaechen — Leermaske -> {dump_mask}; "
+              f"Flux-Inpainting fuer dieses Plate UEBERSPRINGEN (Null-Maske "
+              f"waere nur ein VAE-Roundtrip mit Qualitaetsverlust)")
+    return out, free, counts
 
 
 def main():
@@ -151,8 +158,9 @@ def main():
     if args.sample and args.sample < len(arr):
         idx = np.linspace(0, len(arr) - 1, args.sample).astype(int)
         arr = arr[idx]
+    free = None
     if args.masks:
-        plate = masked_plate(arr, args.masks, dump_mask=args.dump_mask)
+        plate, free, counts = masked_plate(arr, args.masks, dump_mask=args.dump_mask)
     else:
         plate = np.median(arr, axis=0).astype(np.uint8)
     h, w = plate.shape[:2]
@@ -160,12 +168,26 @@ def main():
         fps = args.fps
 
     # Restspuren pruefen: wo weicht der Median stark von der Mehrheit ab?
-    dev = np.median(np.abs(arr.astype(np.float32) - plate), axis=0).mean()
+    d = np.abs(arr.astype(np.float32) - plate).mean(axis=3)
+    if free is not None:
+        # Nur FREIE Samples werten: in arr stehen die Personen ja noch drin.
+        # Der naive Vergleich schlaegt genau dann an, wenn masked_plate seine
+        # Arbeit gemacht hat (Person raus => grosse Differenz Person vs. Boden)
+        # — die Warnung war im Hauptpfad systematisch invertiert (Review 06.08.).
+        valid = counts >= 3
+        d_free = np.where(free, d, np.nan)[:, valid]
+        dev = float(np.nanmean(np.nanmedian(d_free, axis=0))) if valid.any() else 0.0
+        warum = ("Kamera bewegt sich, Licht wechselt oder die Masken sitzen "
+                 "zeitversetzt (fps-Abgleich pruefen)")
+    else:
+        dev = float(np.median(d, axis=0).mean())
+        warum = "Kamera bewegt sich oder Personen stehen zu lange still"
     print(f"[plate] {len(frames)} Frames {w}x{h} @{fps:g}fps, "
           f"mittlere Restabweichung {dev:.1f} (klein = sauberer Raum)")
     if dev > 25:
-        print("WARNUNG: hohe Restabweichung — Kamera bewegt sich oder Personen "
-              "stehen zu lange still; Plate kann Geister enthalten.", file=sys.stderr)
+        # stdout, nicht nur stderr: der Pipeline-Runner zeigt bei Exit 0 nur
+        # die letzten stdout-Zeilen — auf stderr verschwaende die Warnung.
+        print(f"WARNUNG: hohe Restabweichung — {warum}; Plate kann Geister enthalten.")
 
     if args.dump_plate:
         cv2.imwrite(args.dump_plate, plate)

@@ -108,6 +108,11 @@ def validate(spec):
     for key in ("name", "source_video", "camera"):
         if not spec.get(key):
             errs.append(f"Pflichtfeld fehlt: {key}")
+    if any(c.isspace() for c in (spec.get("name") or "")):
+        # Der Name wird zum Dateinamen-Stem; song_beats ersetzt Leerzeichen
+        # durch Unterstriche, die Pipeline suchte dann am falschen Ort und
+        # verlor Beat-Grid und Original-Vorschau still (Review 06.08.).
+        errs.append("name darf keine Leerzeichen enthalten")
     cam = spec.get("camera")
     if cam not in ("static", "moving"):
         errs.append(f"camera muss 'static' oder 'moving' sein, ist {cam!r}")
@@ -189,10 +194,15 @@ def step_audio(job):
                             bpm = v
                     except ValueError:
                         pass
-        stem = os.path.splitext(os.path.basename(raw))[0][:40]
+        # song_beats bildet den Stem MIT Leerzeichen-Ersetzung — hier identisch
+        # rechnen, sonst laeuft die Suche ins Leere und das Grid geht still verloren.
+        stem = os.path.splitext(os.path.basename(raw))[0][:40].replace(" ", "_")
         cand = os.path.join(PROJECT, "assets", "audio", f"{stem}_segment.wav")
         if os.path.isfile(cand):
             grid = cand + ".beats.json"
+        else:
+            job.say(f"WARNUNG: Beat-Segment nicht gefunden ({cand}) — "
+                    f"Beat-Warp und Original-Vorschau entfallen fuer diesen Lauf.")
     bpm = a.get("bpm") or bpm or 100.0
     synth = os.path.join(PROJECT, "assets", "audio", f"{job.name}_synth.wav")
     job.run([os.path.join(TOOLS, "make_beat_track.py"), "--bpm", f"{bpm:.2f}",
@@ -202,15 +212,35 @@ def step_audio(job):
             "grid": grid, "synth": synth, "bpm": bpm}
 
 
+def comfy_output(job, prefix, ext, t_after):
+    """Juengste ComfyUI-Ausgabe zu `prefix` seit `t_after`.
+
+    Die Save-Nodes zaehlen hoch (_00001, _00002, ...). Ein fest verdrahtetes
+    _00001 liest beim zweiten Lauf desselben Job-Namens still die ALTEN
+    Dateien — Tracking, Identitaets-Check und Export arbeiten dann auf dem
+    Ergebnis des ERSTEN Laufs (Stale-Falle, Review 06.08.)."""
+    import glob
+    fallback = os.path.join(COMFY_OUT, f"{prefix}_00001{ext}")
+    if job.dry:
+        return fallback
+    cands = [p for p in glob.glob(os.path.join(COMFY_OUT, f"{prefix}_*{ext}"))
+             if os.path.getmtime(p) >= t_after - 2]
+    if not cands:
+        job.fail(f"keine frische Ausgabe {prefix}_*{ext} seit dem Submit gefunden "
+                 f"— ComfyUI-Ausgabeverzeichnis pruefen")
+    return max(cands, key=os.path.getmtime)
+
+
 def step_pose_static(job, src):
     """2D-Pfad: DWPose auf das Segment, dann Multi-Person-Tracking."""
     n = len(job.s["cast"])
+    t0 = time.time()
     job.run([os.path.join(TOOLS, "submit_workflow.py"),
              os.path.join(PROJECT, "workflows", "save_pose_81.json"),
              "--set", f"1.video={os.path.basename(src)}",
              "--set", f"3.filename_prefix={job.name}_pose", "--timeout", "900"],
             "Pose-Extraktion (DWPose)")
-    pose_json = os.path.join(COMFY_OUT, f"{job.name}_pose_00001.json")
+    pose_json = comfy_output(job, f"{job.name}_pose", ".json", t0)
     job.s["_pose_json"] = pose_json
     outdir = os.path.join(COMFY_IN, f"{job.name}_crew")
     args = [os.path.join(TOOLS, "crew_pose.py"), "--src", pose_json,
@@ -295,6 +325,7 @@ def step_render(job, pose_dirs):
     outs = []
     for i, (pd, c) in enumerate(zip(pose_dirs, s["cast"])):
         prefix = f"{job.name}_fig{i}"
+        t0 = time.time()
         job.run([os.path.join(TOOLS, "submit_workflow.py"),
                  os.path.join(PROJECT, "workflows", wf),
                  "--set", f"20.directory={pd}",
@@ -305,7 +336,7 @@ def step_render(job, pose_dirs):
                  "--set", f"30.width={rw}",
                  "--set", f"30.height={rh}", "--timeout", "1800"],
                 f"Render Figur {i + 1}/{len(pose_dirs)} ({c['ref']})")
-        clip = os.path.join(COMFY_OUT, f"{prefix}_00001.mp4")
+        clip = comfy_output(job, prefix, ".mp4", t0)
         outs.append(clip)
         check_identity(job, clip, c, pd, i)
     return outs
@@ -416,11 +447,12 @@ def step_composite(job, clips, pose_dirs, plate=None):
 
 def step_interpolate(job, clip):
     prefix = f"{job.name}_32"
+    t0 = time.time()
     job.run([os.path.join(TOOLS, "submit_workflow.py"),
              os.path.join(PROJECT, "workflows", "rife_32fps.json"),
              "--set", f"1.video={clip}", "--set", f"3.filename_prefix={prefix}",
              "--timeout", "900"], "Interpolation auf 32 fps")
-    return os.path.join(COMFY_OUT, f"{prefix}_00001.mp4")
+    return comfy_output(job, prefix, ".mp4", t0)
 
 
 def step_export(job, clip, audio):

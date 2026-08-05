@@ -207,19 +207,25 @@ def scale_correction(frames, crop_meta, full_pose_dir=None, sample=7,
     return _scale_correction_ratio(frames, crop_meta, sample)
 
 
-def _scale_correction_ratio(frames, crop_meta, sample=7):
-    """Wan rendert die Figur groesser als die Pose vorgibt — es orientiert sich
-    an der (formatfuellenden) Referenz. Gemessen 06.08. am Crop: Skelett 71%
-    der Bildhoehe, gerenderte Figur 97%. Ohne Korrektur landet die Figur beim
-    Zurueckprojizieren rund 1.4x zu gross in der Szene.
+def _scale_correction_ratio(frames, crop_meta, sample=7, bias=WAN_SCALE_BIAS):
+    """Fallback ohne Vollbild-Posen: Skelett und Figur im CROP-Raum vergleichen.
 
-    Korrektur: gerenderte Figurhoehe gegen die Skeletthoehe derselben Frames
-    messen und den Ausschnitt entsprechend verkleinern (um den Figurfuss herum,
-    denn der Boden ist der Bezug — sonst schwebt oder versinkt die Figur).
+    Zielgroesse ist auch hier Skelett * WAN_SCALE_BIAS (wie im Primaerzweig) —
+    ohne den Bias landet die Figur zu klein neben ihren Nachbarinnen.
+    WICHTIG: gemessen wird gegen die GECROPPTEN Pose-PNGs (crop_pose_dir),
+    nicht gegen source_pose_dir — das sind Vollbild-Skelette in einem anderen
+    Koordinatenraum; anisotrop aufs Crop-Format resized waere pose_h um den
+    Faktor Fensterhoehe/Canvashoehe zu klein (Review 06.08.: 0.26 statt ~0.74).
     """
     import cv2
     import glob
-    pose_files = sorted(glob.glob(os.path.join(crop_meta["source_pose_dir"], "*.png")))
+    crop_dir = crop_meta.get("crop_pose_dir")
+    if not crop_dir or not os.path.isdir(crop_dir):
+        print("WARNUNG: Crop-Posen fuer die Massstabs-Schaetzung nicht gefunden "
+              f"({crop_dir}) — Korrektur 1.0, Figur kann zu gross geraten.",
+              file=sys.stderr)
+        return 1.0
+    pose_files = sorted(glob.glob(os.path.join(crop_dir, "*.png")))
     ow, oh = crop_meta["out"]
     # Paarweise je Frame messen und nur die gestrecktesten Posen werten: dort
     # ist die Figur am ehesten formatfuellend und das Verhaeltnis stabil. In
@@ -247,12 +253,12 @@ def _scale_correction_ratio(frames, crop_meta, sample=7):
         fig_h = float(ys.max() - ys.min())
         pose_h = float(pys.max() - pys.min())
         if fig_h > 10 and pose_h > 10:
-            pairs.append((pose_h, pose_h / fig_h))
+            pairs.append((pose_h, bias * pose_h / fig_h))
     if not pairs:
         return 1.0
     pairs.sort(reverse=True)                      # gestreckteste Posen zuerst
     top = [r for _, r in pairs[:max(3, len(pairs) // 3)]]
-    return float(np.clip(np.median(top), 0.5, 1.0))
+    return float(np.clip(np.median(top), 0.4, 1.2))
 
 
 def uncrop(frames, crop_meta, canvas_w, canvas_h, scale=1.0):
@@ -327,11 +333,16 @@ def main():
     for oi, ov_path in enumerate(args.overlay):
         ov, ov_fps = read_frames(ov_path)
         crop_mask = None
+        crop_bg = None
         if args.overlay_crop:
             entry = args.overlay_crop[oi]
             if entry and entry.lower() != "none":
                 with open(entry, "r", encoding="utf-8-sig") as f:
                     cm = json.load(f)
+                # Aeltere Sidecars kennen crop_pose_dir noch nicht; die
+                # Namenskonvention outdir + '.crop.json' ist garantiert.
+                if entry.endswith(".crop.json"):
+                    cm.setdefault("crop_pose_dir", entry[:-len(".crop.json")])
                 if cm["canvas"] != [w, h]:
                     print(f"FEHLER: {entry} gehoert zu Canvas {cm['canvas']}, "
                           f"Basis ist {[w, h]}.", file=sys.stderr)
@@ -351,6 +362,14 @@ def main():
                 k = min(n, len(ov))
                 mc = person_mask(ov[:k], args.thresh, args.feather,
                                  spatial_bg=args.spatial_mask)
+                # Helligkeits-Referenz ebenfalls VOR dem Uncrop messen: danach
+                # ist die Leinwand mehrheitlich schwarz, der Kanal-Median waere
+                # exakt 0 und der Angleich unten wuerde jede Crop-Figur auf
+                # Weiss saettigen (Review 06.08., von drei Pruefern unabhaengig
+                # gefunden). Gemessen wird nur auf Studio-Pixeln (mc < 0.5).
+                bgpix = ov[:k][mc < 0.5]
+                if bgpix.size >= 300:
+                    crop_bg = np.median(bgpix.reshape(-1, 3), axis=0)
                 ov = uncrop(ov, cm, w, h, sc)
                 crop_mask = uncrop(np.repeat((mc * 255).astype(np.uint8)[..., None], 3,
                                              axis=3), cm, w, h, sc)[..., 0] / 255.0
@@ -382,8 +401,19 @@ def main():
             # anders hell. Ohne Korrektur zeichnet die weiche Maskenkante einen
             # sichtbaren Halo um jede eingefuegte Figur (empirisch 06.08.).
             base_bg = np.median(base.reshape(-1, 3), axis=0)
-            ov_bg = np.median(ov[:k].reshape(-1, 3), axis=0)
-            shift = base_bg - ov_bg
+            if crop_mask is not None:
+                # Referenz stammt aus den Crop-Frames (vor dem Uncrop gemessen);
+                # der Median ueber die zurueckprojizierte Leinwand waere 0.
+                ov_bg = crop_bg
+            else:
+                ov_bg = np.median(ov[:k].reshape(-1, 3), axis=0)
+            shift = (base_bg - ov_bg) if ov_bg is not None else np.zeros(3)
+            if np.abs(shift).max() > 60:
+                # Ein Shift dieser Groesse ist nie ein Studio-Helligkeitsdelta,
+                # sondern eine kaputte Messbasis — dann lieber gar nicht anfassen.
+                print(f"WARNUNG: Helligkeits-Shift {np.round(shift, 1)} unplausibel "
+                      f"— Angleich fuer dieses Overlay uebersprungen.", file=sys.stderr)
+                shift = np.zeros(3)
             ov = np.clip(ov.astype(np.float32) + shift, 0, 255)
             print(f"       Hintergrund-Angleich BGR {np.round(shift, 1)}")
         cover = float(m.mean())

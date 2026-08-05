@@ -83,6 +83,19 @@ class TestBoxesFromPngs(unittest.TestCase):
         cv2.imwrite(p, np.zeros((576, 1024, 3), np.uint8))
         self.assertIsNone(boxes_from_pose_pngs([p])[0])
 
+    def test_canvas_skaliert_boxen(self):
+        """Regression: --canvas != PNG-Groesse lieferte Boxen in nativen
+        PNG-Pixeln, die Fensterplanung rechnete aber in Canvas-Pixeln —
+        der Crop zeigte still die falsche Bildregion."""
+        p = os.path.join(self.d, "s.png")
+        img = np.zeros((540, 960, 3), np.uint8)
+        cv2.line(img, (500, 200), (520, 400), (0, 255, 0), 5)
+        cv2.imwrite(p, img)
+        b1 = boxes_from_pose_pngs([p], margin=0.0)[0]
+        b2 = boxes_from_pose_pngs([p], margin=0.0, canvas=(1920, 1080))[0]
+        for a, b in zip(b1, b2):
+            self.assertAlmostEqual(b, a * 2, delta=0.01)
+
 
 @unittest.skipUnless(HAVE_CV2, "opencv nicht verfuegbar")
 class TestUncrop(unittest.TestCase):
@@ -153,7 +166,7 @@ class TestScaleCorrection(unittest.TestCase):
         frames = np.zeros((4, 768, 512, 3), np.uint8)
         frames[:, 100:700, 100:400] = 200
         meta = {"windows": [[0.0, 0.0, 333.0, 500.0]] * 4, "out": [512, 768],
-                "canvas": [1024, 576], "source_pose_dir": self._pose_dir(500, w=512, h=768)}
+                "canvas": [1024, 576], "crop_pose_dir": self._pose_dir(500, w=512, h=768)}
         sc = scale_correction(frames, meta, None)
         self.assertTrue(0.4 <= sc <= 1.2)
 

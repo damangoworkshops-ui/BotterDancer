@@ -31,13 +31,18 @@ def kps(person):
     return np.array(person["pose_keypoints_2d"], dtype=float).reshape(-1, 3)
 
 
-def boxes_from_pose_pngs(files, margin=0.35):
+def boxes_from_pose_pngs(files, margin=0.35, canvas=None):
     """(F,4) Bounding-Boxen [x0,y0,x1,y1] direkt aus den gerenderten Skelett-PNGs.
 
     WICHTIG: nicht aus dem Pose-JSON ableiten. Die Track-PNGs stammen aus dem
     stabilen Tracking von crew_pose, eine Groessen-Sortierung im JSON trifft
     pro Frame womoeglich eine ANDERE Person — dann sitzt das Crop-Fenster auf
     der falschen Taenzerin (empirisch 06.08.: der Ausschnitt kam schwarz zurueck).
+
+    `canvas=(cw,ch)`: Boxen in DIESEN Koordinatenraum skalieren. Ohne das waeren
+    bei --canvas != PNG-Groesse die Boxen in nativen PNG-Pixeln, die
+    Fensterplanung aber in Canvas-Pixeln — der Crop zeigt dann die falsche
+    Bildregion (Review 06.08.: leerer Crop bei rc=0).
     """
     import cv2
     out = []
@@ -50,10 +55,14 @@ def boxes_from_pose_pngs(files, margin=0.35):
         if len(xs) < 10:
             out.append(None)
             continue
+        sx = sy = 1.0
+        if canvas:
+            ih, iw = img.shape[:2]
+            sx, sy = canvas[0] / iw, canvas[1] / ih
         w = float(xs.max() - xs.min())
         h = float(ys.max() - ys.min())
-        out.append([xs.min() - margin * w, ys.min() - margin * h,
-                    xs.max() + margin * w, ys.max() + margin * h])
+        out.append([(xs.min() - margin * w) * sx, (ys.min() - margin * h) * sy,
+                    (xs.max() + margin * w) * sx, (ys.max() + margin * h) * sy])
     return out
 
 
@@ -127,7 +136,7 @@ def main():
         probe = cv2.imread(files[0])
         ch, cw = probe.shape[:2]
 
-    boxes = boxes_from_pose_pngs(files, args.margin)
+    boxes = boxes_from_pose_pngs(files, args.margin, canvas=(cw, ch))
     found = sum(1 for b in boxes if b is not None)
     wins = plan_windows(boxes, cw, ch, args.width, args.height)
     if wins is None:
@@ -163,6 +172,7 @@ def main():
     os.rename(tmp, args.outdir)
 
     meta = {"source_pose_dir": os.path.abspath(args.pose_dir),
+            "crop_pose_dir": os.path.abspath(args.outdir),
             "canvas": [cw, ch], "out": [args.width, args.height],
             "windows": [[float(v) for v in row] for row in wins],
             "pixel_gain": float(gain)}
