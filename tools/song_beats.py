@@ -30,24 +30,45 @@ FFMPEG_FALLBACK = (r"C:\Users\chris\AppData\Local\Microsoft\WinGet\Packages"
                    r"\ffmpeg-8.1-full_build\bin\ffmpeg.exe")
 
 
-def pick_segment(beats, downbeats, duration, seg_len):
-    """Startzeit: Downbeat im mittleren Songdrittel-bis-80%, dessen Fenster die
-    stabilsten Beat-Intervalle hat (Chorus-artige Passagen sind stabil)."""
+def pick_segment(beats, downbeats, duration, seg_len, accents=None, phase_weight=0.6):
+    """Startzeit waehlen: Downbeat im mittleren Songbereich, dessen Fenster
+    stabile Beat-Intervalle hat.
+
+    Mit `accents` (Bewegungs-Akzente der Choreo in Sekunden ab Clip-Anfang)
+    kommt der PHASEN-FIT dazu: beim echten Song laesst sich die Grid-Phase
+    nicht mehr an die Choreo drehen (anders als beim Synth-Track), also muss
+    das SEGMENT passen. Gewertet wird der mittlere Abstand jedes Akzents zum
+    naechsten Beat des Fensters, normiert aufs Beat-Intervall — 0 heisst
+    perfekt auf dem Raster, 0.5 heisst maximal daneben.
+    """
     beats = np.asarray(beats, dtype=float)
     cands = [d for d in np.asarray(downbeats, dtype=float)
              if 0.2 * duration <= d <= 0.8 * duration - seg_len]
     if not cands:
         cands = [d for d in downbeats if d <= duration - seg_len] or [beats[0]]
+    acc = np.asarray(accents, dtype=float) if accents is not None and len(accents) else None
     best = None
     for d in cands:
         w = beats[(beats >= d) & (beats <= d + seg_len)]
         if len(w) < 4:
             continue
         iv = np.diff(w)
-        score = float(np.std(iv))
+        stab = float(np.std(iv))
+        score = stab
+        phase = None
+        if acc is not None:
+            period = float(np.median(iv))
+            # Akzente liegen relativ zum Clip-Anfang; im Songfenster ab d
+            rel = acc[acc <= seg_len] + d
+            if len(rel):
+                dist = np.array([np.abs(w - t).min() for t in rel])
+                phase = float(np.mean(np.minimum(dist, period - dist)) / period)
+                score = stab + phase_weight * phase
         if best is None or score < best[0]:
-            best = (score, float(d))
-    return best[1] if best else float(cands[0])
+            best = (score, float(d), stab, phase)
+    if not best:
+        return float(cands[0]), None
+    return best[1], best[3]
 
 
 def main():
@@ -56,6 +77,9 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--duration", type=float, default=6.0, help="Segmentlaenge (s)")
     ap.add_argument("--start", type=float, help="Segmentstart erzwingen (sonst Auto-Wahl)")
+    ap.add_argument("--pose", help="Pose-JSON der Choreo — waehlt das Segment zusaetzlich "
+                                   "nach Phasen-Fit zu den Bewegungs-Akzenten")
+    ap.add_argument("--pose-fps", type=float, default=16.0, help="fps der Pose-Sequenz")
     args = ap.parse_args()
 
     audio = Path(args.audio)
@@ -76,8 +100,22 @@ def main():
     print(f"[song] {len(beats)} Beats, {len(downbeats)} Downbeats, "
           f"~{bpm_global:.1f} BPM global")
 
-    start = args.start if args.start is not None else pick_segment(
-        beats, downbeats, dur, args.duration)
+    accents = None
+    if args.pose:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from pose_accents import accents_from_json
+        accents = accents_from_json(args.pose, args.pose_fps)
+        print(f"[song] Choreo-Akzente aus {os.path.basename(args.pose)}: "
+              f"{len(accents)} Stueck")
+
+    phase = None
+    if args.start is not None:
+        start = args.start
+    else:
+        start, phase = pick_segment(beats, downbeats, dur, args.duration, accents)
+        if phase is not None:
+            print(f"[song] Phasen-Fit des gewaehlten Segments: {phase:.3f} "
+                  f"(0 = Akzente exakt auf dem Raster, 0.5 = maximal daneben)")
     seg_beats = beats[(beats >= start) & (beats <= start + args.duration)] - start
     seg_iv = np.diff(seg_beats)
     bpm_seg = 60.0 / float(np.median(seg_iv))
