@@ -54,7 +54,37 @@ def read_frames(path):
     return np.array(frames), float(fps)
 
 
-def person_mask(frames, thresh, feather, min_area=200):
+def pose_boxes(pose_dir, shape, margin=0.10):
+    """Pro Frame eine grosszuegige Bounding-Box der gezeichneten Pose (Skelett-PNGs
+    sind schwarz mit farbigen Gliedmassen). Begrenzt die Maske auf DIESE Taenzerin —
+    ohne das schleppt die Median-Maske Bodenschatten und Nachbarfiguren mit
+    (empirisch 06.08.: 17% Maskenflaeche statt ~6%)."""
+    import cv2
+    import glob
+    files = sorted(glob.glob(os.path.join(pose_dir, "*.png")))
+    n, h, w = shape
+    boxes = []
+    for i in range(n):
+        if i >= len(files):
+            boxes.append(None)
+            continue
+        img = cv2.imread(files[i])
+        if img is None:
+            boxes.append(None)
+            continue
+        if img.shape[0] != h or img.shape[1] != w:
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+        ys, xs = np.where(img.max(axis=2) > 20)
+        if len(xs) < 10:
+            boxes.append(None)
+            continue
+        mx, my = int(margin * w), int(margin * h)
+        boxes.append((max(0, xs.min() - mx), min(w, xs.max() + mx),
+                      max(0, ys.min() - my), min(h, ys.max() + my)))
+    return boxes
+
+
+def person_mask(frames, thresh, feather, min_area=200, boxes=None):
     """(F,H,W) float-Maske 0..1 der bewegten Figur (statische Kamera vorausgesetzt)."""
     import cv2
     bg = np.median(frames, axis=0)                      # zeitlicher Median = Studio
@@ -64,6 +94,11 @@ def person_mask(frames, thresh, feather, min_area=200):
     for i, f in enumerate(frames):
         d = np.linalg.norm(f.astype(np.float32) - bg, axis=2)
         m = (d > thresh).astype(np.uint8)
+        if boxes is not None and i < len(boxes) and boxes[i] is not None:
+            x0, x1, y0, y1 = boxes[i]
+            keep = np.zeros_like(m)
+            keep[y0:y1, x0:x1] = 1
+            m = m * keep
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k_open)     # Rauschen weg
         m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k_close)   # Loecher im Koerper zu
         # nur die groesste zusammenhaengende Flaeche behalten (Rest = Artefakt)
@@ -87,9 +122,14 @@ def main():
     ap.add_argument("--base", required=True, help="Basis-Clip (liefert Hintergrund)")
     ap.add_argument("--overlay", nargs="+", required=True,
                     help="weitere Solo-Clips, spaetere gewinnen bei Ueberlappung")
+    ap.add_argument("--overlay-pose", nargs="*", default=[],
+                    help="je Overlay das zugehoerige Track-Pose-Verzeichnis — "
+                         "begrenzt die Maske auf DIESE Taenzerin (empfohlen)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--thresh", type=float, default=18.0, help="Maskenschwelle (Farbdistanz)")
     ap.add_argument("--feather", type=int, default=3, help="weiche Kante in Pixeln")
+    ap.add_argument("--no-match", action="store_true",
+                    help="Hintergrund-Helligkeitsangleich der Overlays abschalten")
     ap.add_argument("--crf", type=int, default=12)
     args = ap.parse_args()
 
@@ -103,14 +143,29 @@ def main():
     print(f"[comp] Basis {os.path.basename(args.base)}: {n} Frames {w}x{h} @{fps:g}fps")
     out = base.astype(np.float32)
 
-    for ov_path in args.overlay:
+    if args.overlay_pose and len(args.overlay_pose) != len(args.overlay):
+        print(f"FEHLER: --overlay-pose braucht genau {len(args.overlay)} Eintraege.",
+              file=sys.stderr)
+        return 2
+    for oi, ov_path in enumerate(args.overlay):
         ov, _ = read_frames(ov_path)
         if ov.shape[1:3] != (h, w):
             print(f"FEHLER: {ov_path} hat {ov.shape[2]}x{ov.shape[1]}, "
                   f"Basis {w}x{h}.", file=sys.stderr)
             return 2
         k = min(n, len(ov))
-        m = person_mask(ov[:k], args.thresh, args.feather)
+        boxes = (pose_boxes(args.overlay_pose[oi], (k, h, w))
+                 if args.overlay_pose else None)
+        m = person_mask(ov[:k], args.thresh, args.feather, boxes=boxes)
+        if not args.no_match:
+            # Hintergrund-Angleich: jeder Solo-Render generiert sein Studio leicht
+            # anders hell. Ohne Korrektur zeichnet die weiche Maskenkante einen
+            # sichtbaren Halo um jede eingefuegte Figur (empirisch 06.08.).
+            base_bg = np.median(base.reshape(-1, 3), axis=0)
+            ov_bg = np.median(ov[:k].reshape(-1, 3), axis=0)
+            shift = base_bg - ov_bg
+            ov = np.clip(ov.astype(np.float32) + shift, 0, 255)
+            print(f"       Hintergrund-Angleich BGR {np.round(shift, 1)}")
         cover = float(m.mean())
         print(f"[comp] + {os.path.basename(ov_path)}: {k} Frames, "
               f"Maskenflaeche {cover * 100:.1f}%")
