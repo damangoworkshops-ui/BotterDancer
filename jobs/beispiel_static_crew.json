@@ -1,0 +1,22 @@
+{
+  "_comment": "STATISCHE KAMERA (2D-Pfad): die Pose traegt die Kamerafuehrung des Quellclips, sie wird 1:1 uebernommen. Dieser Modus kann MEHRERE Figuren. Vorlage des gelieferten Worth-It-Clips (3 Figuren).",
+  "name": "beispiel_static_crew",
+  "source_video": "E:\\Worth_it_-_Fifth_Harmony_ft.Kid_Ink___May_J_Lee_Choreography.mp4",
+  "start": 441.0,
+  "duration": 6.2,
+  "camera": "static",
+  "quality": "final",
+  "width": 1024,
+  "height": 576,
+  "cast": [
+    {"ref": "ref_neon.png",
+     "prompt": "a dancer wearing an insane neon rainbow rave costume with holographic puffer jacket and chunky platform boots, neon green hair, dancing in a bright white dance studio, full body, natural studio lighting, sharp focus, high quality"},
+    {"ref": "ref_anime.png",
+     "prompt": "a dancer with turquoise twin tails, colorful crop top and baggy cargo pants with rainbow straps, dancing in a bright white dance studio, full body, natural studio lighting, sharp focus"},
+    {"ref": "ref_furry.png",
+     "prompt": "a fluffy creature dancer covered in long pastel rainbow fur wearing a colorful hoodie, big round eyes, small horns, dancing in a bright white dance studio, full body, natural studio lighting, sharp focus"}
+  ],
+  "negative": "low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, photorealistic humans, real people",
+  "composite_thresh": 22,
+  "export_crf": 12
+}

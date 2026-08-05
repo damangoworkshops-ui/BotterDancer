@@ -490,6 +490,14 @@ def refresher():
                 slow_ts = time.time()
             alerts = build_alerts(gpu, comfy, progress, checks)
             with STATE_LOCK:
+                jr = STATE.get("job_running")
+                if jr and jr.get("alive"):
+                    # Lebt der Pipeline-Prozess noch? (sonst bleibt der Start-Knopf
+                    # nach einem Absturz fuer immer gesperrt)
+                    try:
+                        jr["alive"] = psutil_alive(jr["pid"])
+                    except Exception:
+                        jr["alive"] = False
                 STATE.update({"ts": int(time.time()), "gpu": gpu, "comfy": comfy,
                               "progress": progress, "checks": checks,
                               "outputs": outputs, "alerts": alerts,
@@ -501,6 +509,76 @@ def refresher():
                 STATE["collector_error"] = repr(e)
                 STATE["error_ts"] = int(time.time())  # ts bleibt = letzte GUTE Daten
         time.sleep(2.5)
+
+
+# --- Job-Rezepte -------------------------------------------------------------
+JOBS_DIR = os.path.join(PROJECT, "jobs")
+# Was der Kamera-Schalter WIRKLICH umschaltet — die Kopplung ist echt:
+CAMERA_MODES = {
+    "static": {"label": "Statisch (Original-Kamera)",
+               "detail": "2D-Pfad: die Pose traegt die Kamerafuehrung des Quellclips. "
+                         "Mehrere Taenzer:innen moeglich (Full-Crew).",
+               "crew": True},
+    "moving": {"label": "Bewegt (Steadicam / Gimbal / Crane)",
+               "detail": "3D-Pfad: frei gefuehrte virtuelle Kamera inkl. Beat-Warp und "
+                         "Foot-Anchoring. Nur EINE Figur (GVHMR trackt eine Person).",
+               "crew": False},
+}
+
+
+def psutil_alive(pid):
+    """Laeuft der PID noch? (stdlib-only, wie der Rest des HUD)"""
+    r = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}", "/NH"],
+                       capture_output=True, text=True)
+    return str(pid) in (r.stdout or "")
+
+
+def list_jobs():
+    """Job-Rezepte aus jobs/ mit ihrem Kamera-Modus (fuers HUD)."""
+    out = []
+    if os.path.isdir(JOBS_DIR):
+        for fn in sorted(os.listdir(JOBS_DIR)):
+            if not fn.endswith(".json"):
+                continue
+            p = os.path.join(JOBS_DIR, fn)
+            try:
+                with open(p, "r", encoding="utf-8-sig") as f:
+                    spec = json.load(f)
+            except (OSError, ValueError) as e:
+                out.append({"file": fn, "error": repr(e)})
+                continue
+            cam = spec.get("camera", "?")
+            out.append({
+                "file": fn, "name": spec.get("name", fn[:-5]), "camera": cam,
+                "camera_label": CAMERA_MODES.get(cam, {}).get("label", cam),
+                "cast": len(spec.get("cast") or []),
+                "quality": spec.get("quality", "final"),
+                "source": os.path.basename(spec.get("source_video", "")),
+            })
+    return {"modes": CAMERA_MODES, "jobs": out}
+
+
+def start_job(filename):
+    """Pipeline-Runner detached starten (ein Job zur Zeit)."""
+    if os.path.basename(filename) != filename or not filename.endswith(".json"):
+        return False, "ungueltiger Job-Name"
+    p = os.path.join(JOBS_DIR, filename)
+    if not os.path.isfile(p):
+        return False, f"Job-Rezept nicht gefunden: {filename}"
+    with STATE_LOCK:
+        running = STATE.get("job_running")
+    if running and running.get("alive"):
+        return False, f"Es laeuft bereits ein Job: {running.get('file')}"
+    log = os.path.join(OUTPUT_DIR, filename[:-5] + ".pipeline.log")
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(PROJECT, "tools", "pipeline.py"), "--job", p],
+            stdout=fh, stderr=subprocess.STDOUT, creationflags=flags)
+    with STATE_LOCK:
+        STATE["job_running"] = {"file": filename, "pid": proc.pid, "alive": True,
+                                "log": os.path.basename(log), "started": int(time.time())}
+    return True, f"Job {filename} gestartet (PID {proc.pid}, Log: {os.path.basename(log)})"
 
 
 # --- Aktionen ----------------------------------------------------------------
@@ -585,6 +663,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = json.dumps(STATE).encode("utf-8")
             self._send(200, body)
             return
+        if self.path.startswith("/api/jobs"):
+            self._send(200, json.dumps(list_jobs()).encode("utf-8"))
+            return
         if self.path.startswith("/file/"):
             self._serve_file()
             return
@@ -658,6 +739,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/api/action/"):
             name = self.path.rsplit("/", 1)[1]
             ok, detail = do_action(name)
+            self._send(200, json.dumps({"ok": ok, "detail": detail}).encode("utf-8"))
+            return
+        if self.path.startswith("/api/job/"):
+            fn = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+            ok, detail = start_job(fn)
             self._send(200, json.dumps({"ok": ok, "detail": detail}).encode("utf-8"))
             return
         self._send(404, b"{}")

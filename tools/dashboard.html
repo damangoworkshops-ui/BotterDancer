@@ -63,6 +63,14 @@
   #preview .cap { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
   /* Aktionen */
   #actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+#camswitch { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+#camswitch .cam { opacity: .55; }
+#camswitch .cam.on { opacity: 1; outline: 2px solid var(--good); }
+.camdetail { flex-basis: 100%; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.job { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+       padding: 8px 10px; margin-top: 8px; background: var(--panel2, #1b2230); border-radius: 8px; }
+.job.err { color: var(--crit); }
+#joblist .muted { color: var(--muted); font-size: 13px; margin-top: 8px; display: block; }
   button { background: var(--panel-2); color: var(--ink); border: 1px solid #ffffff1f; border-radius: 7px; padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; }
   button:hover { background: #343431; border-color: #ffffff40; }
   button:disabled { opacity: .4; cursor: default; }
@@ -141,6 +149,10 @@
   <button data-act="interrupt" data-confirm="Laufenden Job wirklich abbrechen?">■ Job abbrechen</button>
   <button data-act="ollama_stop" data-confirm="Alle geladenen Ollama-Modelle entladen?">✂ Ollama entladen</button>
 </div>
+
+<h2>Produktion</h2>
+<div id="camswitch"></div>
+<div id="joblist"></div>
 <div id="toast"></div>
 
 <script>
@@ -166,6 +178,7 @@ async function tick() {
     return;
   }
   $("clock").textContent = new Date().toLocaleTimeString("de-DE");
+  window.__st = st;  // Job-Status fuer die Produktions-Sektion
 
   // --- Alerts
   const al = st.alerts || [];
@@ -307,6 +320,66 @@ function toast(msg) {
   t.textContent = msg; t.style.display = "block";
   clearTimeout(toastT); toastT = setTimeout(() => t.style.display = "none", 6000);
 }
+// --- Produktion: Kamera-Schalter + Job-Rezepte -------------------------------
+// Der Schalter waehlt nicht nur die Optik: "statisch" nutzt den 2D-Pfad (Kamera
+// des Quellclips, Gruppen moeglich), "bewegt" den 3D-Pfad (freie Fahrt, aber nur
+// EINE Figur, weil GVHMR eine Person trackt). Die Kopplung wird sichtbar gemacht.
+let CAM_MODE = localStorage.getItem("bd_cam_mode") || "static";
+let JOBS = {modes: {}, jobs: []};
+
+async function loadJobs() {
+  try {
+    JOBS = await (await fetch("/api/jobs", {cache: "no-store"})).json();
+  } catch (e) { return; }
+  renderCamSwitch();
+  renderJobs();
+}
+
+function renderCamSwitch() {
+  const modes = JOBS.modes || {};
+  $("camswitch").innerHTML = Object.keys(modes).map(k => {
+    const m = modes[k], on = k === CAM_MODE;
+    return `<button class="cam ${on ? "on" : ""}" data-cam="${esc(k)}">` +
+           `${on ? "◉" : "○"} ${esc(m.label)}</button>`;
+  }).join("") +
+  (modes[CAM_MODE] ? `<div class="camdetail">${esc(modes[CAM_MODE].detail)}</div>` : "");
+  document.querySelectorAll("#camswitch button.cam").forEach(b => b.onclick = () => {
+    CAM_MODE = b.dataset.cam;
+    localStorage.setItem("bd_cam_mode", CAM_MODE);
+    renderCamSwitch(); renderJobs();
+  });
+}
+
+function renderJobs() {
+  const jobs = (JOBS.jobs || []).filter(j => j.camera === CAM_MODE);
+  const running = (window.__st && window.__st.job_running) || null;
+  const busy = running && running.alive;
+  if (!jobs.length) {
+    $("joblist").innerHTML = `<div class="muted">Kein Rezept fuer diesen Modus in jobs/. ` +
+      `Vorlage: jobs/beispiel_${CAM_MODE === "static" ? "static_crew" : "moving_solo"}.json</div>`;
+    return;
+  }
+  $("joblist").innerHTML = jobs.map(j => j.error
+    ? `<div class="job err">${esc(j.file)}: ${esc(j.error)}</div>`
+    : `<div class="job"><div><b>${esc(j.name)}</b> <span class="muted">` +
+      `${j.cast} Figur${j.cast === 1 ? "" : "en"} · ${esc(j.quality)} · ${esc(j.source)}</span></div>` +
+      `<button data-job="${esc(j.file)}" ${busy ? "disabled" : ""}>` +
+      `${busy ? "belegt" : "▶ starten"}</button></div>`).join("") +
+    (busy ? `<div class="muted">Laeuft: ${esc(running.file)} (PID ${running.pid}) — ` +
+            `Log: ${esc(running.log)}</div>` : "");
+  document.querySelectorAll("#joblist button[data-job]").forEach(b => b.onclick = async () => {
+    if (!window.confirm(`Job ${b.dataset.job} starten? Das belegt die GPU fuer mehrere Minuten.`)) return;
+    toast("…");
+    try {
+      const r = await (await fetch("/api/job/" + encodeURIComponent(b.dataset.job),
+                                   {method: "POST"})).json();
+      toast((r.ok ? "✔ " : "✘ ") + r.detail);
+      loadJobs();
+    } catch (e) { toast("✘ " + e); }
+  });
+}
+loadJobs(); setInterval(loadJobs, 10000);
+
 document.querySelectorAll("#actions button").forEach(b => b.onclick = () => act(b.dataset.act));
 $("outlist").addEventListener("click", e => {
   const li = e.target.closest("li[data-name]");

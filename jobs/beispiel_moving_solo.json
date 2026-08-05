@@ -1,0 +1,24 @@
+{
+  "_comment": "BEWEGTE KAMERA (3D-Pfad): frei gefuehrte virtuelle Kamerafahrt ueber GVHMR + Reprojektion, inkl. Beat-Warp und Foot-Anchoring. Nur EINE Figur - GVHMR trackt eine Person. camera_move: [Start, Ende] je Achse, smoothstep-geeast. Referenz-Sektor beachten: Front-Referenz traegt ~0-120 Grad.",
+  "name": "beispiel_moving_solo",
+  "source_video": "C:\\ComfyUI\\input\\botter_drive_center.mp4",
+  "start": 0.0,
+  "duration": 5.0,
+  "camera": "moving",
+  "quality": "final",
+  "width": 512,
+  "height": 768,
+  "beat_warp": true,
+  "foot_anchor": true,
+  "camera_move": {
+    "azimuth": [-50, 85],
+    "elevation": [14, 4],
+    "distance_scale": [0.95, 0.68]
+  },
+  "cast": [
+    {"ref": "creature_ref.png",
+     "prompt": "a fluffy colorful creature dancing, pastel rainbow fur in soft pink mint green and pale yellow, two curved ribbed salmon-pink horns on top of the head, big amber eyes, fuzzy peach ears, big fluffy pastel tail, full body, studio, sharp focus, high quality"}
+  ],
+  "negative": "horns on arms, ribbed arms, striped arms, low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, multiple people, human",
+  "export_crf": 12
+}
