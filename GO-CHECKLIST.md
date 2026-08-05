@@ -74,6 +74,18 @@ C:\ComfyUI\venv\Scripts\python.exe C:\Users\chris\Documents\BotterDancer\tools\f
   - `moving` — 3D-Pfad, freie virtuelle Fahrt + Beat-Warp + Foot-Anchoring. **Nur EINE Figur** (GVHMR trackt eine Person). Validierung lehnt `moving` + Gruppe vor der GPU-Zeit ab.
 - **Draft-Falle (empirisch belegt 06.08.):** Die Draft-Lane läuft mit cfg 1.0 — dort wird der **Negativ-Prompt gar nicht ausgewertet**. Folge: Das Modell erfindet teils eine zweite Figur zum selben Skelett. Derselbe Track im Final (cfg 4.0) bleibt bei einer Figur. **Draft nur für Timing/Komposition nutzen; Figurenanzahl und Artefakte immer am Final beurteilen.**
 
+## Qualitäts-Gates in der Pipeline [Stand 2026-08-06]
+Jede Stufe prüft sich selbst — die Gates haben in dieser Session viermal echte Fehler gefangen, zweimal in meiner eigenen Kette:
+| Gate | Wo | Was es fängt |
+|---|---|---|
+| Preflight (Dateien, Frames, Instanz-Fingerprint) | vor jedem Submit | falsche ComfyUI-Instanz, fehlende Inputs, unresampelte Pose-Ordner |
+| RIFE-fps-Vertrag | Preflight | Zeitlupen-Ergebnis durch falschen Input — **fing den 30/16-fps-Bug im Raum-Plate** |
+| Artefaktvertrag (fps + Framezahl per ffprobe) | nach jedem Job | verkürzte/falsch getaktete Outputs |
+| Identitäts-Gate (CLIP-Vision) | nach jedem Figuren-Render | Figur trifft ihre Referenz nicht (`identity_gate`: off/warn/strict) |
+| fps-Konsistenz im Compositing | vor dem Mischen | Basis und Overlays mit verschiedener fps |
+| Naht-Metrik (`seam_check`) | nach Chunk-Ketten | Sprung an der Chunk-Grenze (mit Pose-Kontrollmessung) |
+| Export-Verify (C2PA + Watermark + Metadaten) | vor der Publikation | unprüfbare Datei im Export-Ordner |
+
 ## Offene Erkenntnisse aus dem Review (nicht vergessen)
 - `/system_stats` lügt unter WDDM — VRAM-Checks immer via `nvidia-smi`.
 - Altes `comfyui.log` (Scratchpad) ist UTF-16LE — mit PowerShell lesen, nicht grep.
