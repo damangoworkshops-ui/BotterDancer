@@ -128,6 +128,14 @@ def validate(spec):
         errs.append(f"source_video nicht gefunden: {spec['source_video']}")
     if spec.get("quality", "final") not in ("draft", "final"):
         errs.append("quality muss 'draft' oder 'final' sein")
+    bg = spec.get("background", "studio")
+    if bg not in ("studio", "room"):
+        errs.append(f"background muss 'studio' oder 'room' sein, ist {bg!r}")
+    if bg == "room" and cam == "moving":
+        # Das Plate ist ein Standbild aus einer statischen Kamera; eine
+        # virtuelle Fahrt haette keine passende Parallaxe.
+        errs.append("background=room setzt camera=static voraus (das Raum-Plate "
+                    "stammt aus einer statischen Kamera)")
     return errs
 
 
@@ -192,6 +200,7 @@ def step_pose_static(job, src):
              "--set", f"3.filename_prefix={job.name}_pose", "--timeout", "900"],
             "Pose-Extraktion (DWPose)")
     pose_json = os.path.join(COMFY_OUT, f"{job.name}_pose_00001.json")
+    job.s["_pose_json"] = pose_json
     outdir = os.path.join(COMFY_IN, f"{job.name}_crew")
     args = [os.path.join(TOOLS, "crew_pose.py"), "--src", pose_json,
             "--outdir", outdir, "--crew", str(n)]
@@ -266,14 +275,41 @@ def step_render(job, pose_dirs):
     return outs
 
 
-def step_composite(job, clips, pose_dirs):
-    if len(clips) == 1:
+def step_room_plate(job, src, pose_json, fps=16.0):
+    """Raum-Plate fuer background='room': echter Raum, Personen entfernt.
+    Braucht fps-gleiches Video UND Masken aller Personen (Zeitversatz-Falle)."""
+    ffmpeg = find_tool("ffmpeg")
+    matched = os.path.join(COMFY_IN, f"{job.name}_src{int(fps)}.mp4")
+    job.run([ffmpeg, "-v", "error", "-i", src, "-vf", f"fps={fps:g}",
+             "-frames:v", "81", "-c:v", "libx264", "-crf", "10",
+             "-pix_fmt", "yuv420p", "-y", matched], "Quelle auf Pose-fps bringen")
+    masks = os.path.join(COMFY_IN, f"{job.name}_maskall")
+    job.run([os.path.join(TOOLS, "pose_silhouette.py"), "--src", pose_json,
+             "--outdir", masks, "--dilate", "34"], "Personen-Masken (alle)")
+    plate = os.path.join(COMFY_IN, f"{job.name}_plate.mp4")
+    job.run([os.path.join(TOOLS, "room_plate.py"), "--video", matched,
+             "--masks", masks, "--fps", str(fps), "--out", plate], "Raum-Plate")
+    return plate
+
+
+def step_composite(job, clips, pose_dirs, plate=None):
+    if len(clips) == 1 and not plate:
         return clips[0]
     out = os.path.join(COMFY_OUT, f"{job.name}_crew.mp4")
-    args = [os.path.join(TOOLS, "crew_composite.py"), "--base", clips[0],
-            "--overlay"] + clips[1:] + ["--overlay-pose"] + pose_dirs[1:] + \
+    # Mit Raum-Plate ist die Basis der echte Raum und ALLE Figuren sind Overlays;
+    # ohne Plate liefert der erste Clip Hintergrund UND erste Figur.
+    base = plate or clips[0]
+    ov = clips if plate else clips[1:]
+    ovp = pose_dirs if plate else pose_dirs[1:]
+    args = [os.path.join(TOOLS, "crew_composite.py"), "--base", base,
+            "--overlay"] + ov + ["--overlay-pose"] + ovp + \
            ["--thresh", str(job.s.get("composite_thresh", 22)), "--out", out]
-    job.run(args, f"Compositing ({len(clips)} Figuren)")
+    if plate:
+        # Plate und Solo-Renders haben verschiedene Studio-Helligkeiten; der
+        # Angleich wuerde die Figuren ans Plate anpassen statt umgekehrt.
+        args.append("--no-match")
+    job.run(args, f"Compositing ({len(clips)} Figuren"
+                  + (" auf echtem Raum)" if plate else ")"))
     return out
 
 
@@ -348,7 +384,10 @@ def main():
     if job.should_stop("render"):
         job.write_log(outputs=clips)
         return 0
-    merged = step_composite(job, clips, pose_dirs)
+    plate = None
+    if spec.get("background") == "room":
+        plate = step_room_plate(job, src, spec["_pose_json"])
+    merged = step_composite(job, clips, pose_dirs, plate)
     if job.should_stop("composite"):
         job.write_log(outputs=[merged])
         return 0

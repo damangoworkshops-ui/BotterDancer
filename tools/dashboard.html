@@ -362,7 +362,8 @@ function renderJobs() {
   $("joblist").innerHTML = jobs.map(j => j.error
     ? `<div class="job err">${esc(j.file)}: ${esc(j.error)}</div>`
     : `<div class="job"><div><b>${esc(j.name)}</b> <span class="muted">` +
-      `${j.cast} Figur${j.cast === 1 ? "" : "en"} · ${esc(j.quality)} · ${esc(j.source)}</span></div>` +
+      `${j.cast} Figur${j.cast === 1 ? "" : "en"} · ${esc(j.quality)} · ` +
+      `${j.background === "room" ? "echter Raum" : "Studio"} · ${esc(j.source)}</span></div>` +
       `<button data-job="${esc(j.file)}" ${busy ? "disabled" : ""}>` +
       `${busy ? "belegt" : "▶ starten"}</button></div>`).join("") +
     (busy ? `<div class="muted">Laeuft: ${esc(running.file)} (PID ${running.pid}) — ` +

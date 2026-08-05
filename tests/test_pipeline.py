@@ -83,6 +83,21 @@ class TestValidate(unittest.TestCase):
         errs = validate(spec(quality="ultra"))
         self.assertTrue(any("quality" in e for e in errs), errs)
 
+    @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
+    def test_background_room_ist_erlaubt(self):
+        self.assertEqual(validate(spec(background="room")), [])
+
+    def test_unbekannter_hintergrund(self):
+        errs = validate(spec(background="beach"))
+        self.assertTrue(any("background" in e for e in errs), errs)
+
+    @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
+    def test_room_braucht_statische_kamera(self):
+        """Das Raum-Plate stammt aus einer statischen Kamera — eine virtuelle
+        Fahrt darueber haette keine passende Parallaxe."""
+        errs = validate(spec(background="room", camera="moving"))
+        self.assertTrue(any("static" in e for e in errs), errs)
+
 
 class TestCli(unittest.TestCase):
     def test_dry_run_plant_ohne_auszufuehren(self):

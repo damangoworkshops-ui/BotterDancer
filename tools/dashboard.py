@@ -553,6 +553,7 @@ def list_jobs():
                 "camera_label": CAMERA_MODES.get(cam, {}).get("label", cam),
                 "cast": len(spec.get("cast") or []),
                 "quality": spec.get("quality", "final"),
+                "background": spec.get("background", "studio"),
                 "source": os.path.basename(spec.get("source_video", "")),
             })
     return {"modes": CAMERA_MODES, "jobs": out}
