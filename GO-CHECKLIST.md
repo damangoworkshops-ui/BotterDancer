@@ -86,6 +86,11 @@ Jede Stufe prüft sich selbst — die Gates haben in dieser Session viermal echt
 | Naht-Metrik (`seam_check`) | nach Chunk-Ketten | Sprung an der Chunk-Grenze (mit Pose-Kontrollmessung) |
 | Export-Verify (C2PA + Watermark + Metadaten) | vor der Publikation | unprüfbare Datei im Export-Ordner |
 
+## Figuren-Crop + Fable-Review [Stand 2026-08-06 Nacht]
+- **Figuren-Crop** (`figure_crop: true` im Rezept): jede Tänzerin rendert in einem eigenen, figurzentrierten Fenster (Default 512×768) statt im Szenenbild — bei Weitwinkel-Gruppen belegt eine Figur sonst nur ~5 % der Bildfläche. Compositing projiziert maßstabsgetreu zurück (`WAN_SCALE_BIAS` 1.36: Wan rendert formatfüllend, nicht posetreu — alle Figuren, auch im Vollbild). Referenzlauf `jobs\izna_hq.json`: 4 Figuren, echter Raum, 23 min, ein Befehl.
+- **Raum-Plate-Feinschliff:** `room_plate --dump-plate/--dump-mask` + `workflows\flux_plate_inpaint.json` füllt die nie-freien Flächen (~16 % bei fester Formation) per Flux statt Telea — Tür/Sockelleiste/Wandstruktur kommen zurück. Meldet room_plate „keine aussichtslosen Flächen“, den Flux-Schritt ÜBERSPRINGEN (Null-Maske = nur VAE-Roundtrip). Mechanik-Hinweis aus dem Review: flux1-dev verwirft die Bild-Konditionierung (kein Fill-Modell) und fällt kontrolliert auf Noise-Mask-Inpainting zurück — funktioniert, echtes Fill-Modell wäre besser.
+- **Multi-Agent-Review (Commit f3bca7a):** 4 Finder + adversariale Verifikation; 7 echte Bugs gefixt, 6 Verdachtsfälle widerlegt. Die wichtigsten: Helligkeitsangleich hätte Crop-Figuren weiß ausgebrannt (Referenz jetzt VOR uncrop + Plausibilitäts-Gate); Stale-Falle `_00001` (zweiter Lauf gleichen Namens hätte still ALTE Dateien exportiert — jetzt jüngste Ausgabe seit Submit); Maßstabs-Fallback rechnete im falschen Koordinatenraum. Suite: 150 Tests grün.
+
 ## Offene Erkenntnisse aus dem Review (nicht vergessen)
 - `/system_stats` lügt unter WDDM — VRAM-Checks immer via `nvidia-smi`.
 - Altes `comfyui.log` (Scratchpad) ist UTF-16LE — mit PowerShell lesen, nicht grep.
