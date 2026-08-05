@@ -92,6 +92,20 @@ class TestValidate(unittest.TestCase):
         self.assertTrue(any("background" in e for e in errs), errs)
 
     @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
+    def test_identity_gate_werte(self):
+        for g in ("off", "warn", "strict"):
+            self.assertEqual(validate(spec(identity_gate=g)), [], g)
+        errs = validate(spec(identity_gate="maybe"))
+        self.assertTrue(any("identity_gate" in e for e in errs), errs)
+
+    @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
+    def test_identity_schwelle_muss_plausibel_sein(self):
+        self.assertEqual(validate(spec(identity_min_sim=0.6)), [])
+        for bad in (0.0, 1.0, 1.5, "hoch"):
+            errs = validate(spec(identity_min_sim=bad))
+            self.assertTrue(any("identity_min_sim" in e for e in errs), f"{bad}: {errs}")
+
+    @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
     def test_room_braucht_statische_kamera(self):
         """Das Raum-Plate stammt aus einer statischen Kamera — eine virtuelle
         Fahrt darueber haette keine passende Parallaxe."""

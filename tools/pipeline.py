@@ -131,6 +131,12 @@ def validate(spec):
     bg = spec.get("background", "studio")
     if bg not in ("studio", "room"):
         errs.append(f"background muss 'studio' oder 'room' sein, ist {bg!r}")
+    gate = spec.get("identity_gate", "warn")
+    if gate not in ("off", "warn", "strict"):
+        errs.append(f"identity_gate muss 'off', 'warn' oder 'strict' sein, ist {gate!r}")
+    sim = spec.get("identity_min_sim", 0.75)
+    if not isinstance(sim, (int, float)) or not 0.0 < sim < 1.0:
+        errs.append(f"identity_min_sim muss zwischen 0 und 1 liegen, ist {sim!r}")
     if bg == "room" and cam == "moving":
         # Das Plate ist ein Standbild aus einer statischen Kamera; eine
         # virtuelle Fahrt haette keine passende Parallaxe.
@@ -271,8 +277,40 @@ def step_render(job, pose_dirs):
                  "--set", f"30.width={s.get('width', 1024)}",
                  "--set", f"30.height={s.get('height', 576)}", "--timeout", "1800"],
                 f"Render Figur {i + 1}/{len(pose_dirs)} ({c['ref']})")
-        outs.append(os.path.join(COMFY_OUT, f"{prefix}_00001.mp4"))
+        clip = os.path.join(COMFY_OUT, f"{prefix}_00001.mp4")
+        outs.append(clip)
+        check_identity(job, clip, c, pd, i)
     return outs
+
+
+def check_identity(job, clip, cast_entry, pose_dir, idx):
+    """Traegt die gerenderte Figur wirklich ihre Referenz? (CLIP-Vision)
+
+    Laeuft direkt nach dem Render, damit eine misslungene Figur auffaellt,
+    BEVOR Compositing, Interpolation und Export darauf aufbauen. Default ist
+    'warn': ein Abbruch nach neun Minuten Renderzeit hilft niemandem, eine
+    uebersehene Fehlbesetzung aber auch nicht.
+    """
+    mode = job.s.get("identity_gate", "warn")
+    if mode == "off" or job.dry:
+        return
+    ref = os.path.join(COMFY_IN, cast_entry["ref"])
+    args = [os.path.join(TOOLS, "identity_check.py"), "--video", clip,
+            "--ref", ref, "--pose-dir", pose_dir, "--samples", "5",
+            "--min-sim", str(job.s.get("identity_min_sim", 0.75))]
+    r = subprocess.run([PY_COMFY] + args, capture_output=True, text=True)
+    line = next((l for l in r.stdout.splitlines() if l.startswith("[ident] Mittel")), "")
+    job.log.append({"step": f"Identitaets-Check Figur {idx + 1}", "rc": r.returncode,
+                    "summary": line.strip()})
+    if r.returncode == 0:
+        job.say(f"Identitaet Figur {idx + 1} ok — {line.replace('[ident] ', '')}")
+        return
+    msg = (f"Figur {idx + 1} ({cast_entry['ref']}) trifft ihre Referenz nicht: "
+           f"{line.replace('[ident] ', '') or r.stdout.strip()[-160:]}")
+    if mode == "strict":
+        job.fail(msg + " (identity_gate=strict)", 5)
+    job.say("WARNUNG: " + msg + " — Rezept pruefen (Prompt/Referenz), "
+            "identity_gate='strict' bricht hier ab.")
 
 
 def step_room_plate(job, src, pose_json, fps=16.0):
