@@ -37,7 +37,7 @@ def find_tool(name):
     return cand if os.path.isfile(cand) else None
 
 
-def masked_plate(arr, mask_dir, min_samples=3):
+def masked_plate(arr, mask_dir, min_samples=3, dump_mask=None):
     """Median NUR ueber Frames, in denen der Pixel unverdeckt ist.
 
     Der blinde Median scheitert, sobald jemand konstant an derselben Stelle
@@ -93,7 +93,14 @@ def masked_plate(arr, mask_dir, min_samples=3):
     if hopeless.any():
         import cv2
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        out = cv2.inpaint(out, cv2.dilate(hopeless, k), 6, cv2.INPAINT_TELEA)
+        grown = cv2.dilate(hopeless, k)
+        if dump_mask:
+            # Fuers Modell-Inpainting: diese Flaechen kann kein Median fuellen.
+            # Telea zieht nur die Umgebung hinein — bei strukturiertem
+            # Hintergrund bleiben Schlieren, die ein Bildmodell besser loest.
+            cv2.imwrite(dump_mask, (grown * 255).astype(np.uint8))
+            print(f"[plate] Maske der aussichtslosen Flaechen -> {dump_mask}")
+        out = cv2.inpaint(out, grown, 6, cv2.INPAINT_TELEA)
         print(f"[plate] {int(hopeless.sum())} dauerhaft verdeckte Pixel "
               f"({hopeless.mean() * 100:.1f}%) per Telea-Inpainting gefuellt")
     return out
@@ -115,6 +122,9 @@ def main():
                     "Frames gemittelt, in denen dort NIEMAND steht — das entfernt die "
                     "Geister, die der blinde Median bei fester Formation stehen laesst.")
     ap.add_argument("--crf", type=int, default=12)
+    ap.add_argument("--dump-mask", help="PNG-Pfad: Maske der Flaechen, die kein Median "
+                    "fuellen kann (Eingabe fuer Modell-Inpainting)")
+    ap.add_argument("--dump-plate", help="PNG-Pfad: das Plate als Standbild")
     args = ap.parse_args()
 
     import cv2
@@ -142,7 +152,7 @@ def main():
         idx = np.linspace(0, len(arr) - 1, args.sample).astype(int)
         arr = arr[idx]
     if args.masks:
-        plate = masked_plate(arr, args.masks)
+        plate = masked_plate(arr, args.masks, dump_mask=args.dump_mask)
     else:
         plate = np.median(arr, axis=0).astype(np.uint8)
     h, w = plate.shape[:2]
@@ -157,6 +167,9 @@ def main():
         print("WARNUNG: hohe Restabweichung — Kamera bewegt sich oder Personen "
               "stehen zu lange still; Plate kann Geister enthalten.", file=sys.stderr)
 
+    if args.dump_plate:
+        cv2.imwrite(args.dump_plate, plate)
+        print(f"[plate] Standbild -> {args.dump_plate}")
     cmd = [ffmpeg, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "bgr24",
            "-s", f"{w}x{h}", "-r", f"{fps:.6f}", "-i", "-", "-map_metadata", "-1",
            "-c:v", "libx264", "-preset", "medium", "-crf", str(args.crf),

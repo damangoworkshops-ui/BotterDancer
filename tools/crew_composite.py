@@ -55,6 +55,37 @@ def read_frames(path):
     return np.array(frames), float(fps)
 
 
+def _spatial_mask(frames, thresh, feather, min_area=200):
+    """Maske ueber die RANDFARBE jedes Frames — fuer figurzentrierte Crops, wo
+    der zeitliche Median die Figur selbst ist. Der Studio-Hintergrund ist am
+    Bildrand praktisch immer unverdeckt."""
+    import cv2
+    n, h, w = frames.shape[:3]
+    masks = np.empty((n, h, w), dtype=np.float32)
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    band = max(4, w // 40)
+    for i, f in enumerate(frames):
+        edge = np.concatenate([f[:, :band].reshape(-1, 3), f[:, -band:].reshape(-1, 3),
+                               f[:band, :].reshape(-1, 3)])
+        bg = np.median(edge, axis=0)
+        d = np.linalg.norm(f.astype(np.float32) - bg, axis=2)
+        m = (d > thresh).astype(np.uint8)
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k_open)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k_close)
+        cnt, lab, stats, _ = cv2.connectedComponentsWithStats(m, 8)
+        if cnt > 1:
+            big = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            m = ((lab == big).astype(np.uint8) if stats[big, cv2.CC_STAT_AREA] >= min_area
+                 else np.zeros_like(m))
+        if feather > 0:
+            kk = 2 * feather + 1
+            masks[i] = cv2.GaussianBlur(m.astype(np.float32), (kk, kk), 0)
+        else:
+            masks[i] = m.astype(np.float32)
+    return np.clip(masks, 0.0, 1.0)
+
+
 def pose_boxes(pose_dir, shape, margin=0.10):
     """Pro Frame eine grosszuegige Bounding-Box der gezeichneten Pose (Skelett-PNGs
     sind schwarz mit farbigen Gliedmassen). Begrenzt die Maske auf DIESE Taenzerin —
@@ -85,9 +116,18 @@ def pose_boxes(pose_dir, shape, margin=0.10):
     return boxes
 
 
-def person_mask(frames, thresh, feather, min_area=200, boxes=None):
-    """(F,H,W) float-Maske 0..1 der bewegten Figur (statische Kamera vorausgesetzt)."""
+def person_mask(frames, thresh, feather, min_area=200, boxes=None, spatial_bg=False):
+    """(F,H,W) float-Maske 0..1 der Figur.
+
+    Standard: zeitlicher Median als Hintergrund (statische Kamera, Figur bewegt
+    sich durchs Bild). Das versagt bei FIGURZENTRIERTEN CROPS — dort steht die
+    Figur konstant in der Mitte, der Median IST die Figur und die Maske wird
+    unbrauchbar (empirisch 06.08.: Studio-Reste im Composite als Schlieren).
+    spatial_bg=True nimmt stattdessen die Randfarbe JEDES Frames als Referenz.
+    """
     import cv2
+    if spatial_bg:
+        return _spatial_mask(frames, thresh, feather, min_area)
     bg = np.median(frames, axis=0)                      # zeitlicher Median = Studio
     masks = np.empty(frames.shape[:3], dtype=np.float32)
     k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
@@ -257,6 +297,9 @@ def main():
     ap.add_argument("--feather", type=int, default=3, help="weiche Kante in Pixeln")
     ap.add_argument("--no-match", action="store_true",
                     help="Hintergrund-Helligkeitsangleich der Overlays abschalten")
+    ap.add_argument("--spatial-mask", action="store_true",
+                    help="Maske bei Crops ueber die Randfarbe statt den zeitlichen "
+                         "Median (bei uniformem Hintergrund manchmal besser)")
     ap.add_argument("--no-scale-fix", action="store_true",
                     help="Massstabs-Korrektur bei --overlay-crop abschalten (Wan rendert "
                          "die Figur groesser als die Pose vorgibt)")
@@ -301,8 +344,13 @@ def main():
                 # ausserhalb des Fensters alles schwarz — der helle Crop-Kasten
                 # wuerde dann komplett als "Figur" maskiert (Befund 06.08.:
                 # sichtbarer Rahmen um die Figur).
+                # Median-Maske trotz zentrierter Figur: der raeumliche Weg
+                # (Randfarbe) erfasst im nicht-uniformen Studio zu viel
+                # (gemessen 06.08.: 12-16%% statt 6-8%% Maskenflaeche, sichtbare
+                # Kaesten). Beide Wege sind Naeherungen — der Median gewinnt.
                 k = min(n, len(ov))
-                mc = person_mask(ov[:k], args.thresh, args.feather)
+                mc = person_mask(ov[:k], args.thresh, args.feather,
+                                 spatial_bg=args.spatial_mask)
                 ov = uncrop(ov, cm, w, h, sc)
                 crop_mask = uncrop(np.repeat((mc * 255).astype(np.uint8)[..., None], 3,
                                              axis=3), cm, w, h, sc)[..., 0] / 255.0
