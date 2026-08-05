@@ -1,0 +1,20 @@
+{
+  "_comment": "Schneller End-to-End-Beweis der Pipeline (Draft, 2 Figuren): faehrt alle sieben Schritte in wenigen Minuten. ACHTUNG (empirisch 06.08.): quality=draft laeuft mit cfg 1.0, dort ist der Negativ-Prompt WIRKUNGSLOS - das Modell erfindet dann teils eine zweite Figur zum selben Skelett. Draft ist fuer Timing und Komposition da; Figurenanzahl und Artefakte immer am Final beurteilen.",
+  "name": "smoke_static",
+  "source_video": "E:\\DRIP_-_IZNA___직장인KPOP_DANCE_CLASS___INTRO_Dance_Studio___광주댄스학원.mp4",
+  "start": 5.0,
+  "duration": 6.2,
+  "camera": "static",
+  "quality": "draft",
+  "width": 1024,
+  "height": 576,
+  "cast": [
+    {"ref": "iref_cartoon.png",
+     "prompt": "a 3d cartoon girl dancer with orange curly hair and colorful patchwork dungarees, dancing in a bright dance studio, full body, natural studio lighting, sharp focus"},
+    {"ref": "iref_robot.png",
+     "prompt": "a friendly humanoid robot dancer with glossy candy-colored panels and a glowing visor face, dancing in a bright dance studio, full body, natural studio lighting, sharp focus"}
+  ],
+  "negative": "low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, photorealistic humans, real people",
+  "export_crf": 12,
+  "no_watermark": true
+}

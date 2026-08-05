@@ -67,6 +67,13 @@ C:\ComfyUI\venv\Scripts\python.exe C:\Users\chris\Documents\BotterDancer\tools\f
 - ~~Offen/bewusst: workloadabhängige Dashboard-Baselines, genereller Artefaktvertrag, Tests ins Projekt einchecken, git-Repo-Frage.~~ **Alle vier erledigt 04.08. nachts:** Workload-Baselines (draft 8,0/final 15,7 s/it, skaliert mit Pixel×Frames, Signatur aus laufendem Prompt-Graph), Video-Artefaktvertrag (ffprobe-Postcondition: fps + Framezahl aus dem Graph), Testsuite `tests/` (40 Tests, synthetische Fixtures, `python -m unittest discover -s tests`), **öffentliches Repo: https://github.com/damangoworkshops-ui/BotterDancer** (MIT; assets/ + keys/ + logs/ per .gitignore ausgeschlossen — Treibervideo/Motion-Daten bleiben wegen Video-/Choreographie-Urheberrecht lokal).
 - Test-Fixture-Erkenntnis (04.08.): dwtDct trägt nur auf chroma-texturiertem Content — flächige Quellen (testsrc2, Weißframes) überleben Kompression nicht; das Export-Verify-Gate fängt solche Fälle zur Laufzeit (bewusstes Verhalten). Watermark-Pfad verlangt jetzt min. 256×256.
 
+## Produktion: Pipeline-Runner + Kamera-Modi [NEU 2026-08-06]
+- `python tools\pipeline.py --job jobs\<rezept>.json` fährt die ganze Kette (Segment → Beats → Pose → Render → Composite → RIFE → Export), `--dry-run` und `--stop-after <schritt>` zum Prüfen. Job-Protokoll landet als `<name>.job.json` im Output.
+- **Kamera-Modi und ihre Kopplung** (im HUD als Schalter, Regel vom Nutzer bestätigt):
+  - `static` — 2D-Pfad, die Pose trägt die Original-Kameraführung. **Mehrere Figuren möglich** (Full-Crew).
+  - `moving` — 3D-Pfad, freie virtuelle Fahrt + Beat-Warp + Foot-Anchoring. **Nur EINE Figur** (GVHMR trackt eine Person). Validierung lehnt `moving` + Gruppe vor der GPU-Zeit ab.
+- **Draft-Falle (empirisch belegt 06.08.):** Die Draft-Lane läuft mit cfg 1.0 — dort wird der **Negativ-Prompt gar nicht ausgewertet**. Folge: Das Modell erfindet teils eine zweite Figur zum selben Skelett. Derselbe Track im Final (cfg 4.0) bleibt bei einer Figur. **Draft nur für Timing/Komposition nutzen; Figurenanzahl und Artefakte immer am Final beurteilen.**
+
 ## Offene Erkenntnisse aus dem Review (nicht vergessen)
 - `/system_stats` lügt unter WDDM — VRAM-Checks immer via `nvidia-smi`.
 - Altes `comfyui.log` (Scratchpad) ist UTF-16LE — mit PowerShell lesen, nicht grep.

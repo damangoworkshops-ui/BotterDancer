@@ -239,8 +239,16 @@ def step_pose_moving(job, src):
 
 def step_render(job, pose_dirs):
     s = job.s
-    wf = ("wan_animate_draft.json" if s.get("quality", "final") == "draft"
-          else "wan_animate_final_v2.json")
+    draft = s.get("quality", "final") == "draft"
+    wf = "wan_animate_draft.json" if draft else "wan_animate_final_v2.json"
+    if draft:
+        # Empirisch 06.08. am selben Track belegt: die Draft-Lane faehrt cfg 1.0,
+        # dort wird der Negativ-Prompt gar nicht ausgewertet (keine CFG) — das
+        # Modell erfindet dann gern eine zweite Figur zum selben Skelett. Der
+        # Final-Render (cfg 4.0) mit identischem Input bleibt bei einer Figur.
+        job.say("HINWEIS: quality=draft laeuft mit cfg 1.0 — Negativ-Prompts sind "
+                "WIRKUNGSLOS. Draft taugt fuer Timing/Komposition, nicht zur "
+                "Beurteilung von Figurenanzahl oder Artefakten.")
     outs = []
     for i, (pd, c) in enumerate(zip(pose_dirs, s["cast"])):
         prefix = f"{job.name}_fig{i}"
