@@ -41,6 +41,20 @@ Lauf schreibt ein Job-Protokoll neben den Output.
 technisch nicht ausgewertet, das Modell erfindet dann teils zusätzliche Figuren.
 Draft ist für Timing und Komposition; Figurenanzahl und Artefakte am Final beurteilen.
 
+**Mehr Detail pro Figur:** `figure_crop: true` rendert jede Tänzerin in einem
+eigenen, figurzentrierten Fenster statt im Szenenbild — bei Weitwinkel-Gruppen
+belegt eine Figur sonst nur ~5 % der Bildfläche. Das Compositing projiziert
+maßstabsgetreu zurück (auf die Größe, die ein Vollbild-Render erzeugt hätte).
+
+## Qualitäts-Gates
+
+Jede Stufe prüft sich selbst und bricht laut ab, statt still Falsches zu liefern:
+Preflight (Instanz-Fingerprint, Inputs, Frame-Zahlen), RIFE-fps-Vertrag,
+Artefaktvertrag (fps + Framezahl per ffprobe), Identitäts-Gate (CLIP-Vision:
+trifft die Figur ihre Referenz?), fps-Konsistenz im Compositing, Naht-Metrik für
+Chunk-Ketten, Export-Verify (C2PA + Watermark + Metadaten). Details und die
+Fälle, die sie gefangen haben, stehen in `GO-CHECKLIST.md`.
+
 ## Was hier bewusst NICHT liegt
 
 - `assets/` — Treibervideos (zeigen echte Tänzer; Urheberrecht an Video und
