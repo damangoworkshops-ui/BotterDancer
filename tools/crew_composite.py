@@ -17,6 +17,7 @@ bei Ueberlappung gewinnt die spaetere (Vordergrund zuletzt angeben).
                            --out crew.mp4 [--thresh 18] [--feather 3]
 """
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -117,6 +118,72 @@ def person_mask(frames, thresh, feather, min_area=200, boxes=None):
     return np.clip(masks, 0.0, 1.0)
 
 
+def scale_correction(frames, crop_meta, sample=7):
+    """Wan rendert die Figur groesser als die Pose vorgibt — es orientiert sich
+    an der (formatfuellenden) Referenz. Gemessen 06.08. am Crop: Skelett 71%
+    der Bildhoehe, gerenderte Figur 97%. Ohne Korrektur landet die Figur beim
+    Zurueckprojizieren rund 1.4x zu gross in der Szene.
+
+    Korrektur: gerenderte Figurhoehe gegen die Skeletthoehe derselben Frames
+    messen und den Ausschnitt entsprechend verkleinern (um den Figurfuss herum,
+    denn der Boden ist der Bezug — sonst schwebt oder versinkt die Figur).
+    """
+    import cv2
+    import glob
+    pose_files = sorted(glob.glob(os.path.join(crop_meta["source_pose_dir"], "*.png")))
+    ow, oh = crop_meta["out"]
+    # Verhaeltnis der MAXIMA ueber die Stichprobe, nicht Median der
+    # Einzelverhaeltnisse: in gebueckten Frames ist das Skelett flach, waehrend
+    # das Modell die Figur formatfuellend haelt — Einzelverhaeltnisse ziehen den
+    # Wert dann nach unten (gemessen 0.53 statt der korrekten ~0.73).
+    fig_hs, pose_hs = [], []
+    idxs = np.linspace(0, min(len(frames), len(pose_files)) - 1, sample).astype(int)
+    for i in idxs:
+        f = frames[int(i)]
+        bg = np.median(np.concatenate([f[:8, :8].reshape(-1, 3),
+                                       f[:8, -8:].reshape(-1, 3)]), axis=0)
+        m = np.linalg.norm(f.astype(np.int16) - bg, axis=2) > 40
+        ys, _ = np.where(m)
+        if len(ys) >= 50:
+            fig_hs.append(float(ys.max() - ys.min()))
+        p = cv2.imread(pose_files[int(i)])
+        if p is None:
+            continue
+        if p.shape[0] != oh or p.shape[1] != ow:
+            p = cv2.resize(p, (ow, oh), interpolation=cv2.INTER_NEAREST)
+        pys, _ = np.where(p.max(axis=2) > 20)
+        if len(pys) >= 20:
+            pose_hs.append(float(pys.max() - pys.min()))
+    if not fig_hs or not pose_hs:
+        return 1.0
+    return float(np.clip(max(pose_hs) / max(fig_hs), 0.5, 1.0))
+
+
+def uncrop(frames, crop_meta, canvas_w, canvas_h, scale=1.0):
+    """Figurzentrierte Crops zurueck auf die volle Leinwand projizieren.
+    Ausserhalb des Fensters bleibt das Bild leer — die Maske entsteht ohnehin
+    nur aus dem eingesetzten Bereich. `scale` < 1 verkleinert den Ausschnitt
+    fussbuendig (Boden als Bezug)."""
+    import cv2
+    wins = crop_meta["windows"]
+    out = np.zeros((len(frames), canvas_h, canvas_w, 3), np.uint8)
+    for i, f in enumerate(frames):
+        if i >= len(wins):
+            break
+        x, y, w, h = wins[i]
+        tw, th = w * scale, h * scale
+        # fussbuendig: untere Kante bleibt, Breite mittig
+        x0 = int(round(x + (w - tw) / 2.0))
+        y0 = int(round(y + (h - th)))
+        x1, y1 = min(canvas_w, x0 + int(round(tw))), min(canvas_h, y0 + int(round(th)))
+        x0, y0 = max(0, x0), max(0, y0)
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            continue
+        out[i, y0:y1, x0:x1] = cv2.resize(f, (x1 - x0, y1 - y0),
+                                          interpolation=cv2.INTER_LANCZOS4)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="Solo-Renders zu einer Gruppe compositen")
     ap.add_argument("--base", required=True, help="Basis-Clip (liefert Hintergrund)")
@@ -125,11 +192,18 @@ def main():
     ap.add_argument("--overlay-pose", nargs="*", default=[],
                     help="je Overlay das zugehoerige Track-Pose-Verzeichnis — "
                          "begrenzt die Maske auf DIESE Taenzerin (empfohlen)")
+    ap.add_argument("--overlay-crop", nargs="*", default=[],
+                    help="je Overlay ein .crop.json (figure_crop.py): der Clip ist dann "
+                         "ein figurzentrierter Ausschnitt in hoher Aufloesung und wird "
+                         "beim Mischen an seine Originalposition zurueckprojiziert")
     ap.add_argument("--out", required=True)
     ap.add_argument("--thresh", type=float, default=18.0, help="Maskenschwelle (Farbdistanz)")
     ap.add_argument("--feather", type=int, default=3, help="weiche Kante in Pixeln")
     ap.add_argument("--no-match", action="store_true",
                     help="Hintergrund-Helligkeitsangleich der Overlays abschalten")
+    ap.add_argument("--no-scale-fix", action="store_true",
+                    help="Massstabs-Korrektur bei --overlay-crop abschalten (Wan rendert "
+                         "die Figur groesser als die Pose vorgibt)")
     ap.add_argument("--crf", type=int, default=12)
     args = ap.parse_args()
 
@@ -147,8 +221,36 @@ def main():
         print(f"FEHLER: --overlay-pose braucht genau {len(args.overlay)} Eintraege.",
               file=sys.stderr)
         return 2
+    if args.overlay_crop and len(args.overlay_crop) != len(args.overlay):
+        print(f"FEHLER: --overlay-crop braucht genau {len(args.overlay)} Eintraege.",
+              file=sys.stderr)
+        return 2
     for oi, ov_path in enumerate(args.overlay):
         ov, ov_fps = read_frames(ov_path)
+        crop_mask = None
+        if args.overlay_crop:
+            entry = args.overlay_crop[oi]
+            if entry and entry.lower() != "none":
+                with open(entry, "r", encoding="utf-8-sig") as f:
+                    cm = json.load(f)
+                if cm["canvas"] != [w, h]:
+                    print(f"FEHLER: {entry} gehoert zu Canvas {cm['canvas']}, "
+                          f"Basis ist {[w, h]}.", file=sys.stderr)
+                    return 2
+                sc = 1.0 if args.no_scale_fix else scale_correction(ov, cm)
+                # Maske VOR dem Uncrop bestimmen: im Crop findet der zeitliche
+                # Median den Studio-Hintergrund korrekt. Nach dem Uncrop ist
+                # ausserhalb des Fensters alles schwarz — der helle Crop-Kasten
+                # wuerde dann komplett als "Figur" maskiert (Befund 06.08.:
+                # sichtbarer Rahmen um die Figur).
+                k = min(n, len(ov))
+                mc = person_mask(ov[:k], args.thresh, args.feather)
+                ov = uncrop(ov, cm, w, h, sc)
+                crop_mask = uncrop(np.repeat((mc * 255).astype(np.uint8)[..., None], 3,
+                                             axis=3), cm, w, h, sc)[..., 0] / 255.0
+                print(f"       zurueckprojiziert aus {os.path.basename(entry)} "
+                      f"({cm.get('pixel_gain', 0):.1f}x Aufloesungsgewinn, "
+                      f"Massstabs-Korrektur {sc:.2f})")
         # fps-Konsistenz ist Pflicht: das Ergebnis erbt die fps der BASIS, ein
         # abweichender Overlay laeuft dann zeitlich falsch (Befund 06.08.:
         # 30er-Raum-Plate + 16er-Figuren = 1.9x zu schneller Clip; erst das
@@ -163,9 +265,12 @@ def main():
                   f"Basis {w}x{h}.", file=sys.stderr)
             return 2
         k = min(n, len(ov))
-        boxes = (pose_boxes(args.overlay_pose[oi], (k, h, w))
-                 if args.overlay_pose else None)
-        m = person_mask(ov[:k], args.thresh, args.feather, boxes=boxes)
+        if crop_mask is not None:
+            m = crop_mask[:k]
+        else:
+            boxes = (pose_boxes(args.overlay_pose[oi], (k, h, w))
+                     if args.overlay_pose else None)
+            m = person_mask(ov[:k], args.thresh, args.feather, boxes=boxes)
         if not args.no_match:
             # Hintergrund-Angleich: jeder Solo-Render generiert sein Studio leicht
             # anders hell. Ohne Korrektur zeichnet die weiche Maskenkante einen
