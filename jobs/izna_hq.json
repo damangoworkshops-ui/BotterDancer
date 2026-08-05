@@ -1,0 +1,37 @@
+{
+  "_comment": "CREW IM ECHTEN RAUM: background='room' erzeugt aus dem Quellclip ein Raum-Plate (Personen per maskiertem Median + Inpainting entfernt) und komponiert die Solo-Renders darauf. Setzt camera='static' voraus - das Plate stammt aus einer statischen Kamera. Grenze: bei glatten Studiowaenden gut, bei stark strukturiertem Hintergrund bleiben Schlieren an den Standpositionen (dort stehen die Figuren, deshalb meist unkritisch). Mit figure_crop=true bekommt jede Figur ihr eigenes Fenster in voller Render-Aufloesung (crop_width/crop_height); das Compositing projiziert massstabsgetreu zurueck.",
+  "name": "izna_hq",
+  "source_video": "E:\\DRIP_-_IZNA___직장인KPOP_DANCE_CLASS___INTRO_Dance_Studio___광주댄스학원.mp4",
+  "start": 5.0,
+  "duration": 6.2,
+  "camera": "static",
+  "background": "room",
+  "quality": "final",
+  "width": 1024,
+  "height": 576,
+  "cast": [
+    {
+      "ref": "iref_cartoon.png",
+      "prompt": "a 3d cartoon girl dancer with orange curly hair and colorful patchwork dungarees, dancing in a bright dance studio, full body, natural studio lighting, sharp focus, high quality"
+    },
+    {
+      "ref": "iref_fae.png",
+      "prompt": "a fantasy fae dancer with iridescent butterfly wings and flowing emerald petal dress, silver-lilac hair, dancing in a bright dance studio, full body, natural studio lighting, sharp focus"
+    },
+    {
+      "ref": "iref_robot.png",
+      "prompt": "a friendly humanoid robot dancer with glossy candy-colored panels and a glowing visor face, dancing in a bright dance studio, full body, natural studio lighting, sharp focus"
+    },
+    {
+      "ref": "iref_fluff2.png",
+      "prompt": "a tall shaggy monster dancer covered in electric blue and purple fur wearing orange shorts, dancing in a bright dance studio, full body, natural studio lighting, sharp focus"
+    }
+  ],
+  "negative": "multiple people, duplicate person, low quality, blurry, distorted, deformed hands, extra limbs, watermark, text, photorealistic humans, real people",
+  "composite_thresh": 22,
+  "export_crf": 12,
+  "no_watermark": true,
+  "figure_crop": true,
+  "crop_width": 512,
+  "crop_height": 768
+}

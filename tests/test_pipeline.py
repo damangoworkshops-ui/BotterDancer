@@ -92,6 +92,12 @@ class TestValidate(unittest.TestCase):
         self.assertTrue(any("background" in e for e in errs), errs)
 
     @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
+    def test_figure_crop_nur_mit_statischer_kamera(self):
+        self.assertEqual(validate(spec(figure_crop=True)), [])
+        errs = validate(spec(figure_crop=True, camera="moving"))
+        self.assertTrue(any("figure_crop" in e for e in errs), errs)
+
+    @unittest.skipUnless(os.path.isdir(COMFY_IN), "ComfyUI-Input fehlt")
     def test_identity_gate_werte(self):
         for g in ("off", "warn", "strict"):
             self.assertEqual(validate(spec(identity_gate=g)), [], g)

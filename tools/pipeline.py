@@ -131,6 +131,11 @@ def validate(spec):
     bg = spec.get("background", "studio")
     if bg not in ("studio", "room"):
         errs.append(f"background muss 'studio' oder 'room' sein, ist {bg!r}")
+    if spec.get("figure_crop") and cam == "moving":
+        # Der 3D-Pfad rendert bereits figurzentriert (die virtuelle Kamera
+        # bestimmt den Ausschnitt) — ein zweiter Crop waere sinnlos.
+        errs.append("figure_crop ist nur mit camera=static sinnvoll (der 3D-Pfad "
+                    "rahmt die Figur bereits ueber die virtuelle Kamera)")
     gate = spec.get("identity_gate", "warn")
     if gate not in ("off", "warn", "strict"):
         errs.append(f"identity_gate muss 'off', 'warn' oder 'strict' sein, ist {gate!r}")
@@ -213,7 +218,25 @@ def step_pose_static(job, src):
     if n > 1:
         args.append("--split")
     job.run(args, f"Tracking ({n} Figur{'en' if n > 1 else ''})")
-    return [f"{outdir}_t{i}" for i in range(n)] if n > 1 else [outdir]
+    dirs = [f"{outdir}_t{i}" for i in range(n)] if n > 1 else [outdir]
+    job.s["_full_pose_dirs"] = dirs
+
+    if job.s.get("figure_crop"):
+        # Jede Figur bekommt ihr eigenes Fenster in voller Render-Aufloesung.
+        # Der Gewinn haengt davon ab, wie klein die Figur im Bild steht — bei
+        # Weitwinkel-Gruppen ist er am groessten.
+        cw, chh = job.s.get("crop_width", 512), job.s.get("crop_height", 768)
+        crops = []
+        for i, d in enumerate(dirs):
+            cd = os.path.join(COMFY_IN, f"{job.name}_crop_t{i}")
+            job.run([os.path.join(TOOLS, "figure_crop.py"), "--pose-dir", d,
+                     "--outdir", cd, "--width", str(cw), "--height", str(chh),
+                     "--margin", str(job.s.get("crop_margin", 0.22))],
+                    f"Figuren-Crop {i + 1}/{len(dirs)}")
+            crops.append(cd)
+        job.s["_crop_meta"] = [c + ".crop.json" for c in crops]
+        return crops
+    return dirs
 
 
 def step_pose_moving(job, src):
@@ -264,6 +287,11 @@ def step_render(job, pose_dirs):
         job.say("HINWEIS: quality=draft laeuft mit cfg 1.0 — Negativ-Prompts sind "
                 "WIRKUNGSLOS. Draft taugt fuer Timing/Komposition, nicht zur "
                 "Beurteilung von Figurenanzahl oder Artefakten.")
+    # Beim Crop rendert jede Figur in ihrem eigenen Fenster, sonst in Szenengroesse
+    if s.get("figure_crop"):
+        rw, rh = s.get("crop_width", 512), s.get("crop_height", 768)
+    else:
+        rw, rh = s.get("width", 1024), s.get("height", 576)
     outs = []
     for i, (pd, c) in enumerate(zip(pose_dirs, s["cast"])):
         prefix = f"{job.name}_fig{i}"
@@ -274,13 +302,33 @@ def step_render(job, pose_dirs):
                  "--set", f"17.image={c['ref']}",
                  "--set", f"13.text={c['prompt']}",
                  "--set", f"14.text={c.get('negative', s.get('negative', 'low quality, blurry, distorted, deformed hands, extra limbs, watermark, text'))}",
-                 "--set", f"30.width={s.get('width', 1024)}",
-                 "--set", f"30.height={s.get('height', 576)}", "--timeout", "1800"],
+                 "--set", f"30.width={rw}",
+                 "--set", f"30.height={rh}", "--timeout", "1800"],
                 f"Render Figur {i + 1}/{len(pose_dirs)} ({c['ref']})")
         clip = os.path.join(COMFY_OUT, f"{prefix}_00001.mp4")
         outs.append(clip)
         check_identity(job, clip, c, pd, i)
     return outs
+
+
+def _plate_from_first(job, clip):
+    """Ohne Raum-Plate braucht der Crop-Modus trotzdem einen Hintergrund in
+    Szenengroesse. Der erste Solo-Render taugt dafuer nicht (er IST ein
+    Ausschnitt), deshalb ein leeres Studio-Plate in Szenenmassen."""
+    ffmpeg = find_tool("ffmpeg")
+    out = os.path.join(COMFY_IN, f"{job.name}_bgplate.mp4")
+    w, h = job.s.get("width", 1024), job.s.get("height", 576)
+    job.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+             f"color=c=0xE8EAEC:s={w}x{h}:r=16", "-frames:v", "81",
+             "-c:v", "libx264", "-crf", "10", "-pix_fmt", "yuv420p", "-y", out],
+            "Neutrales Studio-Plate (Crop-Modus ohne echten Raum)")
+    return out
+
+
+def _composite_pose_dirs(job, pose_dirs):
+    """Fuer die Masken/Boxen im Composite immer die VOLLBILD-Posen nehmen —
+    beim Crop sind `pose_dirs` die Ausschnitte, die dort nicht passen."""
+    return job.s.get("_full_pose_dirs") or pose_dirs
 
 
 def check_identity(job, clip, cast_entry, pose_dir, idx):
@@ -331,17 +379,26 @@ def step_room_plate(job, src, pose_json, fps=16.0):
 
 
 def step_composite(job, clips, pose_dirs, plate=None):
-    if len(clips) == 1 and not plate:
+    crop_meta = job.s.get("_crop_meta")
+    if len(clips) == 1 and not plate and not crop_meta:
         return clips[0]
     out = os.path.join(COMFY_OUT, f"{job.name}_crew.mp4")
+    full_dirs = _composite_pose_dirs(job, pose_dirs)
     # Mit Raum-Plate ist die Basis der echte Raum und ALLE Figuren sind Overlays;
-    # ohne Plate liefert der erste Clip Hintergrund UND erste Figur.
-    base = plate or clips[0]
-    ov = clips if plate else clips[1:]
-    ovp = pose_dirs if plate else pose_dirs[1:]
+    # ohne Plate liefert der erste Clip Hintergrund UND erste Figur. Crop-Renders
+    # sind IMMER Overlays — ein Ausschnitt taugt nicht als Hintergrund.
+    if plate or crop_meta:
+        base = plate or _plate_from_first(job, clips[0])
+        ov, ovp = clips, full_dirs
+        meta = crop_meta
+    else:
+        base, ov, ovp = clips[0], clips[1:], full_dirs[1:]
+        meta = None
     args = [os.path.join(TOOLS, "crew_composite.py"), "--base", base,
             "--overlay"] + ov + ["--overlay-pose"] + ovp + \
            ["--thresh", str(job.s.get("composite_thresh", 22)), "--out", out]
+    if meta:
+        args += ["--overlay-crop"] + meta
     if plate:
         # Plate und Solo-Renders haben verschiedene Studio-Helligkeiten; der
         # Angleich wuerde die Figuren ans Plate anpassen statt umgekehrt.
