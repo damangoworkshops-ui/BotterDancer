@@ -1,0 +1,22 @@
+{
+  "_comment": "Full-Crew-Casting per Layering (06.08.): rendert EINE Taenzerin (isolierte Track-Pose) mit EIGENER Referenz IN eine bestehende Szene. Node 21 laedt das Ergebnis der Vorstufe als background_video -> Wan kompositiert selbst (inkl. Licht/Schatten), statt dass wir hinterher freistellen. Erste Ebene: 21.directory auf ein leeres/Studio-Plate zeigen lassen oder Node 21+background_video-Link entfernen. Draft-Variante (lightx2v, 4 Steps).",
+  "prompt": {
+    "10": {"class_type":"UNETLoader","inputs":{"unet_name":"wan2.2_animate_14B_bf16.safetensors","weight_dtype":"default"}},
+    "19": {"class_type":"LoraLoaderModelOnly","inputs":{"model":["10",0],"lora_name":"lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors","strength_model":1.0}},
+    "11": {"class_type":"ModelSamplingSD3","inputs":{"model":["19",0],"shift":8.0}},
+    "12": {"class_type":"CLIPLoader","inputs":{"clip_name":"umt5_xxl_fp8_e4m3fn_scaled.safetensors","type":"wan"}},
+    "13": {"class_type":"CLIPTextEncode","inputs":{"clip":["12",0],"text":"a dancer"}},
+    "14": {"class_type":"CLIPTextEncode","inputs":{"clip":["12",0],"text":"low quality, blurry"}},
+    "15": {"class_type":"VAELoader","inputs":{"vae_name":"wan_2.1_vae.safetensors"}},
+    "16": {"class_type":"CLIPVisionLoader","inputs":{"clip_name":"clip_vision_h.safetensors"}},
+    "17": {"class_type":"LoadImage","inputs":{"image":"ref_neon.png"}},
+    "18": {"class_type":"CLIPVisionEncode","inputs":{"clip_vision":["16",0],"image":["17",0],"crop":"none"}},
+    "20": {"class_type":"VHS_LoadImagesPath","inputs":{"directory":"C:\\ComfyUI\\input\\worthit_crew_pose_t0","image_load_cap":81,"skip_first_images":0,"select_every_nth":1}},
+    "21": {"class_type":"VHS_LoadVideoPath","inputs":{"video":"C:\\ComfyUI\\output\\crew_t0_draft_00001.mp4","force_rate":0,"custom_width":0,"custom_height":0,"frame_load_cap":81,"skip_first_frames":0,"select_every_nth":1}},
+    "30": {"class_type":"WanAnimateToVideo","inputs":{"positive":["13",0],"negative":["14",0],"vae":["15",0],"width":1024,"height":576,"length":81,"batch_size":1,"continue_motion_max_frames":5,"video_frame_offset":0,"clip_vision_output":["18",0],"reference_image":["17",0],"pose_video":["20",0],"background_video":["21",0]}},
+    "31": {"class_type":"KSampler","inputs":{"model":["11",0],"positive":["30",0],"negative":["30",1],"latent_image":["30",2],"seed":42,"steps":4,"cfg":1.0,"sampler_name":"euler","scheduler":"simple","denoise":1.0}},
+    "35": {"class_type":"TrimVideoLatent","inputs":{"samples":["31",0],"trim_amount":["30",3]}},
+    "32": {"class_type":"VAEDecode","inputs":{"samples":["35",0],"vae":["15",0]}},
+    "33": {"class_type":"VHS_VideoCombine","inputs":{"images":["32",0],"frame_rate":16,"loop_count":0,"filename_prefix":"crew_layer","format":"video/h264-mp4","pingpong":false,"save_output":true,"save_metadata":false}}
+  }
+}
