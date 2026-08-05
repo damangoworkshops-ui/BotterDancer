@@ -344,8 +344,14 @@ def check_identity(job, clip, cast_entry, pose_dir, idx):
         return
     ref = os.path.join(COMFY_IN, cast_entry["ref"])
     args = [os.path.join(TOOLS, "identity_check.py"), "--video", clip,
-            "--ref", ref, "--pose-dir", pose_dir, "--samples", "5",
+            "--ref", ref, "--samples", "5",
             "--min-sim", str(job.s.get("identity_min_sim", 0.75))]
+    # Die Pose-Box schneidet die Figur aus dem Szenenbild — bei einem
+    # figurzentrierten Crop waere das ein ZWEITER Ausschnitt und verglichen
+    # wuerde ein Figur-Detail mit dem Referenz-Ganzbild (gemessen 06.08.:
+    # 0.72-0.75 statt der korrekten 0.81-0.85).
+    if not job.s.get("figure_crop"):
+        args += ["--pose-dir", pose_dir]
     r = subprocess.run([PY_COMFY] + args, capture_output=True, text=True)
     line = next((l for l in r.stdout.splitlines() if l.startswith("[ident] Mittel")), "")
     job.log.append({"step": f"Identitaets-Check Figur {idx + 1}", "rc": r.returncode,

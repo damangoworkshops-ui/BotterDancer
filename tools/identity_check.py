@@ -74,7 +74,11 @@ def main():
                                        "aus, statt das ganze Bild zu vergleichen")
     ap.add_argument("--samples", type=int, default=9)
     ap.add_argument("--min-sim", type=float, default=0.75,
-                    help="Mindest-Kosinus-Aehnlichkeit zur Referenz")
+                    help="Mindest-Kosinus-Aehnlichkeit zur Referenz. Kalibriert an echten "
+                         "Laeufen (06.08.): korrekte Figuren 0.78-0.87, echte "
+                         "Fehlbesetzung 0.41. WICHTIG: --pose-dir NUR bei Vollbild-"
+                         "Renders angeben; bei figurzentrierten Crops schneidet die Box "
+                         "ein zweites Mal und drueckt die Werte auf 0.72-0.75.")
     args = ap.parse_args()
 
     import cv2
